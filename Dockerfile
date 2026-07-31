@@ -4,7 +4,8 @@ WORKDIR /app
 COPY pom.xml .
 COPY src ./src
 
-RUN mvn clean package -DskipTests
+# Exécute les tests unitaires avant le package (ne pas skipTests).
+RUN mvn clean package
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
