@@ -115,6 +115,13 @@
             <artifactId>spring-boot-starter-mail</artifactId>
         </dependency>
 
+        <!-- Stripe (Connect OAuth + PaymentIntents) -->
+        <dependency>
+            <groupId>com.stripe</groupId>
+            <artifactId>stripe-java</artifactId>
+            <version>28.4.0</version>
+        </dependency>
+
         <!-- Documentation API -->
         <dependency>
             <groupId>org.springdoc</groupId>

@@ -7,6 +7,9 @@ public record FormResultsFieldResponse(
         String label,
         String fieldType,
         int displayOrder,
-        List<String> options
+        List<String> options,
+        /** true si le champ a été retiré du formulaire mais conserve des réponses. */
+        boolean removed,
+        FieldSettingsDto settings
 ) {
 }

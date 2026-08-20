@@ -24,6 +24,7 @@ import com.agenticform.dto.FormResultsResponse;
 import com.agenticform.dto.FormSummaryResponse;
 import com.agenticform.dto.InProgressSessionResponse;
 import com.agenticform.dto.ReorderFormFieldsRequest;
+import com.agenticform.dto.SetFormLoginPasswordRequest;
 import com.agenticform.dto.UpdateFormFieldRequest;
 import com.agenticform.dto.UpdateFormRequest;
 import com.agenticform.security.UserPrincipal;
@@ -73,6 +74,16 @@ public class FormController {
             @Valid @RequestBody UpdateFormRequest request) {
         return ResponseEntity.ok(
                 formService.updateForm(workspaceId, formId, requireUserId(principal), request));
+    }
+
+    @PostMapping("/{formId}/login-password")
+    public ResponseEntity<FormResponse> setLoginPassword(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long workspaceId,
+            @PathVariable Long formId,
+            @Valid @RequestBody SetFormLoginPasswordRequest request) {
+        return ResponseEntity.ok(
+                formService.setLoginPassword(workspaceId, formId, requireUserId(principal), request));
     }
 
     @DeleteMapping("/{formId}")

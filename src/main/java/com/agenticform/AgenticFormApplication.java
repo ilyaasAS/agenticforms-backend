@@ -2,10 +2,10 @@ package com.agenticform;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
-// Cette annotation active l'auto-configuration, le scan des composants
-// (controllers, services, repositories) et la configuration Spring Boot.
 @SpringBootApplication
+@EnableScheduling
 public class AgenticFormApplication {
 
     /**

@@ -93,8 +93,15 @@ public class Form {
     private String calculationsJson;
 
     /** JSON array of page definitions (id, type, title, fieldIds…). */
-    @Column(name = "pages_json", columnDefinition = "TEXT")
+    @Column(name = "pages_json", columnDefinition = "MEDIUMTEXT")
     private String pagesJson;
+
+    /** Thème UI (ex. light, dark, crimson, quiet-sands…). */
+    @Column(name = "theme_id", nullable = false, length = 32)
+    @NotBlank
+    @Size(max = 32)
+    @Builder.Default
+    private String themeId = "dark";
 
     @PrePersist
     void onCreate() {
@@ -107,6 +114,9 @@ public class Form {
         }
         if (status == null) {
             status = FormStatus.DRAFT;
+        }
+        if (themeId == null || themeId.isBlank()) {
+            themeId = "dark";
         }
     }
 

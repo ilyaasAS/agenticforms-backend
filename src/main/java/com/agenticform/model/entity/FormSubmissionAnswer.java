@@ -43,6 +43,6 @@ public class FormSubmissionAnswer {
     @NotNull
     private FormField field;
 
-    @Column(name = "value_text", columnDefinition = "TEXT")
+    @Column(name = "value_text", columnDefinition = "MEDIUMTEXT")
     private String valueText;
 }

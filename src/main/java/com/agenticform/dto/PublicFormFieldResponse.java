@@ -10,6 +10,7 @@ public record PublicFormFieldResponse(
         int displayOrder,
         List<String> options,
         String placeholder,
-        String uiComponent
+        String uiComponent,
+        FieldSettingsDto settings
 ) {
 }

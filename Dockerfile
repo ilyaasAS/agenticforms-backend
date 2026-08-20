@@ -19,13 +19,15 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder --chown=spring:spring /app/target/*.jar app.jar
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 
-# Répertoire de logs accessible en écriture par le compte non-root
-RUN mkdir -p /app/logs \
-    && chown -R spring:spring /app/logs
-
-USER spring
+# Répertoires logs + média (volume monté par-dessus /data/media en compose)
+RUN mkdir -p /app/logs /data/media /app/data/media \
+    && chown -R spring:spring /app/logs /data/media /app/data/media \
+    && chmod +x /app/docker-entrypoint.sh
 
 EXPOSE 8080
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Entrée root uniquement pour chown du volume, puis bascule sur spring.
+USER root
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

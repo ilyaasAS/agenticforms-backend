@@ -3,6 +3,7 @@ package com.agenticform.exception;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -143,6 +144,45 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleIllegalArgument(IllegalArgumentException ex) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(CalendlyNotConfiguredException.class)
+    public ResponseEntity<Map<String, Object>> handleCalendlyNotConfigured(
+            CalendlyNotConfiguredException ex) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+    }
+
+    @ExceptionHandler(CalendlyIntegrationException.class)
+    public ResponseEntity<Map<String, Object>> handleCalendlyIntegration(CalendlyIntegrationException ex) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(GoogleCalendarNotConfiguredException.class)
+    public ResponseEntity<Map<String, Object>> handleGoogleCalendarNotConfigured(
+            GoogleCalendarNotConfiguredException ex) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "Google Calendar n’est pas configuré.");
+    }
+
+    @ExceptionHandler(GoogleCalendarIntegrationException.class)
+    public ResponseEntity<Map<String, Object>> handleGoogleCalendarIntegration(
+            GoogleCalendarIntegrationException ex) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(StripeNotConfiguredException.class)
+    public ResponseEntity<Map<String, Object>> handleStripeNotConfigured(
+            StripeNotConfiguredException ex) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+    }
+
+    @ExceptionHandler(StripeIntegrationException.class)
+    public ResponseEntity<Map<String, Object>> handleStripeIntegration(StripeIntegrationException ex) {
+        return error(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
     @ExceptionHandler(FormFieldNotFoundException.class)
     public ResponseEntity<Map<String, Object>> handleFormFieldNotFound(FormFieldNotFoundException ex) {
         return error(HttpStatus.NOT_FOUND, "Champ de formulaire introuvable.");
@@ -151,6 +191,32 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidFormFieldException.class)
     public ResponseEntity<Map<String, Object>> handleInvalidFormField(InvalidFormFieldException ex) {
         return error(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ResponseEntity<Map<String, Object>> handleMaxUpload(Exception ex) {
+        return error(
+                HttpStatus.PAYLOAD_TOO_LARGE,
+                "Image trop volumineuse (max 5 Mo). Compressez-la ou choisissez une autre image."
+        );
+    }
+
+    @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, Object>> handleDataIntegrity(
+            org.springframework.dao.DataIntegrityViolationException ex
+    ) {
+        String detail = Optional.ofNullable(ex.getMostSpecificCause())
+                .map(Throwable::getMessage)
+                .orElse("")
+                .toLowerCase();
+        if (detail.contains("data too long") || detail.contains("data truncation")) {
+            return error(
+                    HttpStatus.BAD_REQUEST,
+                    "Données trop volumineuses pour être enregistrées. Réimportez l’image via Importations (upload serveur)."
+            );
+        }
+        log.error("Data integrity violation", ex);
+        return error(HttpStatus.CONFLICT, "Conflit avec l’état actuel des données.");
     }
 
     @ExceptionHandler({BadCredentialsException.class, AuthenticationException.class})
@@ -200,7 +266,7 @@ public class GlobalExceptionHandler {
         if ("password".equals(field) || "newPassword".equals(field)) {
             return "Le mot de passe doit contenir au moins 8 caractères, une majuscule et un chiffre ou caractère spécial.";
         }
-        if ("email".equals(field)) {
+        if ("email".equals(field) || "guestEmail".equals(field) || field.endsWith(".guestEmail")) {
             return "Adresse e-mail invalide.";
         }
         if ("code".equals(field)) {

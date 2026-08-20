@@ -1,6 +1,7 @@
 package com.agenticform.repository;
 
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -22,4 +23,14 @@ public interface FormSessionRepository extends JpaRepository<FormSession, String
             @Param("status") FormSessionStatus status);
 
     long countByForm_IdAndStatus(Long formId, FormSessionStatus status);
+
+    Optional<FormSession> findFirstByForm_IdAndRespondentEmailIgnoreCaseAndStatusOrderByUpdatedAtDesc(
+            Long formId,
+            String respondentEmail,
+            FormSessionStatus status);
+
+    List<FormSession> findAllByForm_IdAndRespondentEmailIgnoreCaseAndStatus(
+            Long formId,
+            String respondentEmail,
+            FormSessionStatus status);
 }

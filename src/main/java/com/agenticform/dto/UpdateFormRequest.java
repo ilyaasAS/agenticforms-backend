@@ -23,6 +23,12 @@ public record UpdateFormRequest(
         List<CalculationDto> calculations,
 
         @Valid
-        List<FormPageDto> pages
+        List<FormPageDto> pages,
+
+        @Size(max = 32, message = "themeId must be at most 32 characters")
+        String themeId,
+
+        @Valid
+        ProgressBarConfigDto progressBar
 ) {
 }

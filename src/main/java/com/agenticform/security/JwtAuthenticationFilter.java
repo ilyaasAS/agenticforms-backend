@@ -116,6 +116,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (path.contains("/api/v1/public/forms/")) {
             return true;
         }
+        if ("GET".equalsIgnoreCase(request.getMethod())
+                && path.contains("/api/v1/integrations/calendly/callback")) {
+            return true;
+        }
+        if ("GET".equalsIgnoreCase(request.getMethod())
+                && path.contains("/api/v1/integrations/google-calendar/callback")) {
+            return true;
+        }
+        if ("GET".equalsIgnoreCase(request.getMethod())
+                && path.contains("/api/v1/integrations/stripe/callback")) {
+            return true;
+        }
+        if (("GET".equalsIgnoreCase(request.getMethod()) || "HEAD".equalsIgnoreCase(request.getMethod()))
+                && (path.contains("/api/v1/media/proxy")
+                || path.contains("/api/v1/media/files/"))) {
+            return true;
+        }
         if ("GET".equalsIgnoreCase(request.getMethod()) && path.endsWith("/api/auth/csrf")) {
             return true;
         }

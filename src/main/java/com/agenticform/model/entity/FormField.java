@@ -86,6 +86,14 @@ public class FormField {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    /** Soft-delete : le champ disparaît de l’éditeur / public, mais les réponses restent. */
+    @Column(name = "deleted_at")
+    private Instant deletedAt;
+
+    public boolean isDeleted() {
+        return deletedAt != null;
+    }
+
     @PrePersist
     void onCreate() {
         Instant now = Instant.now();

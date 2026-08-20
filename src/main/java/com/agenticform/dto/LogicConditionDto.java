@@ -1,8 +1,11 @@
 package com.agenticform.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record LogicConditionDto(
         @NotBlank
         @Size(max = 64)

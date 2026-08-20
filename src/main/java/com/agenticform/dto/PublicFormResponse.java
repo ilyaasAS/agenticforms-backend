@@ -12,6 +12,8 @@ public record PublicFormResponse(
         List<LogicRuleDto> logicRules,
         List<CalculationDto> calculations,
         List<FormPageDto> pages,
+        String themeId,
+        ProgressBarConfigDto progressBar,
         Instant updatedAt
 ) {
 }

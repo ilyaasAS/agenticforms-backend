@@ -1,5 +1,6 @@
 package com.agenticform.service;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -13,13 +14,16 @@ import org.springframework.transaction.annotation.Transactional;
 import com.agenticform.dto.CreateFormFieldRequest;
 import com.agenticform.dto.CreateFormRequest;
 import com.agenticform.dto.FormFieldResponse;
+import com.agenticform.dto.FormPageDto;
 import com.agenticform.dto.FormResponse;
 import com.agenticform.dto.FormResultsFieldResponse;
 import com.agenticform.dto.FormResultsResponse;
 import com.agenticform.dto.FormSubmissionRowResponse;
 import com.agenticform.dto.FormSummaryResponse;
 import com.agenticform.dto.InProgressSessionResponse;
+import com.agenticform.dto.ProgressBarConfigDto;
 import com.agenticform.dto.ReorderFormFieldsRequest;
+import com.agenticform.dto.SetFormLoginPasswordRequest;
 import com.agenticform.dto.UpdateFormFieldRequest;
 import com.agenticform.dto.UpdateFormRequest;
 import com.agenticform.exception.FormFieldNotFoundException;
@@ -51,6 +55,8 @@ public class FormService {
     private final UserRepository userRepository;
     private final WorkspaceAuthorizationService authorizationService;
     private final FormMapper formMapper;
+    private final LoginConfigSupport loginConfigSupport;
+    private final FormLoginService formLoginService;
 
     public FormService(
             FormRepository formRepository,
@@ -59,7 +65,9 @@ public class FormService {
             FormSessionRepository formSessionRepository,
             UserRepository userRepository,
             WorkspaceAuthorizationService authorizationService,
-            FormMapper formMapper) {
+            FormMapper formMapper,
+            LoginConfigSupport loginConfigSupport,
+            FormLoginService formLoginService) {
         this.formRepository = formRepository;
         this.formFieldRepository = formFieldRepository;
         this.formSubmissionRepository = formSubmissionRepository;
@@ -67,20 +75,23 @@ public class FormService {
         this.userRepository = userRepository;
         this.authorizationService = authorizationService;
         this.formMapper = formMapper;
+        this.loginConfigSupport = loginConfigSupport;
+        this.formLoginService = formLoginService;
     }
 
     @Transactional(readOnly = true)
     public List<FormSummaryResponse> listForms(Long workspaceId, Long userId) {
         authorizationService.requireCanView(workspaceId, userId);
         return formRepository.findAllByWorkspaceIdOrderByUpdatedAtDesc(workspaceId).stream()
-                .map(form -> formMapper.toSummary(form, formFieldRepository.countByFormId(form.getId())))
+                .map(form -> formMapper.toSummary(form, formFieldRepository.countByFormIdAndDeletedAtIsNull(form.getId())))
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public FormResponse getForm(Long workspaceId, Long formId, Long userId) {
         authorizationService.requireCanView(workspaceId, userId);
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
+        pruneOrphanSchedulingSlots(form);
         return formMapper.toResponse(form);
     }
 
@@ -97,6 +108,9 @@ public class FormService {
                 .description(normalizeText(request.description()))
                 .status(request.status() != null ? request.status() : FormStatus.DRAFT)
                 .createdBy(creator)
+                .themeId(request.themeId() != null && !request.themeId().isBlank()
+                        ? request.themeId().trim()
+                        : "dark")
                 .logicRulesJson(formMapper.serializeLogicRules(
                         request.logicRules() != null ? request.logicRules() : List.of()))
                 .calculationsJson(formMapper.serializeCalculations(
@@ -140,9 +154,40 @@ public class FormService {
             form.setCalculationsJson(formMapper.serializeCalculations(request.calculations()));
         }
         if (request.pages() != null) {
-            form.setPagesJson(formMapper.serializePages(request.pages()));
+            ProgressBarConfigDto progressBar = request.progressBar();
+            if (progressBar == null) {
+                progressBar = formMapper.parseProgressBar(form.getPagesJson());
+            }
+            List<FormPageDto> existingPages = formMapper.parsePages(form.getPagesJson());
+            List<FormPageDto> mergedPages = loginConfigSupport.mergeLoginPasswordHashes(
+                    existingPages, request.pages());
+            form.setPagesJson(formMapper.serializePagesDocument(mergedPages, progressBar));
+        } else if (request.progressBar() != null) {
+            List<FormPageDto> pages = formMapper.parsePages(form.getPagesJson());
+            form.setPagesJson(formMapper.serializePagesDocument(pages, request.progressBar()));
+        }
+        if (request.themeId() != null) {
+            String themeId = request.themeId().trim();
+            if (!themeId.isEmpty()) {
+                form.setThemeId(themeId);
+            }
         }
 
+        Form saved = formRepository.save(form);
+        return formMapper.toResponse(
+                formRepository.findByIdAndWorkspaceIdWithFields(saved.getId(), workspaceId)
+                        .orElse(saved));
+    }
+
+    @Transactional
+    public FormResponse setLoginPassword(
+            Long workspaceId,
+            Long formId,
+            Long userId,
+            SetFormLoginPasswordRequest request) {
+        authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
+        Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
+        formLoginService.setLoginPassword(form, request.password());
         Form saved = formRepository.save(form);
         return formMapper.toResponse(
                 formRepository.findByIdAndWorkspaceIdWithFields(saved.getId(), workspaceId)
@@ -160,7 +205,7 @@ public class FormService {
     public List<FormFieldResponse> listFields(Long workspaceId, Long formId, Long userId) {
         authorizationService.requireCanView(workspaceId, userId);
         requireFormInWorkspace(workspaceId, formId);
-        return formFieldRepository.findAllByFormIdOrderByDisplayOrderAsc(formId).stream()
+        return formFieldRepository.findAllByFormIdAndDeletedAtIsNullOrderByDisplayOrderAsc(formId).stream()
                 .map(formMapper::toFieldResponse)
                 .toList();
     }
@@ -176,7 +221,7 @@ public class FormService {
 
         int nextOrder = request.displayOrder() != null
                 ? request.displayOrder()
-                : formFieldRepository.countByFormId(formId);
+                : formFieldRepository.countByFormIdAndDeletedAtIsNull(formId);
 
         FormField field = buildField(request, nextOrder);
         field.setForm(form);
@@ -195,7 +240,7 @@ public class FormService {
         authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
         requireFormInWorkspace(workspaceId, formId);
 
-        FormField field = formFieldRepository.findByIdAndFormId(fieldId, formId)
+        FormField field = formFieldRepository.findByIdAndFormIdAndDeletedAtIsNull(fieldId, formId)
                 .orElseThrow(() -> new FormFieldNotFoundException(fieldId));
 
         if (request.label() != null) {
@@ -238,10 +283,13 @@ public class FormService {
     @Transactional
     public void deleteField(Long workspaceId, Long formId, Long fieldId, Long userId) {
         authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
-        requireFormInWorkspace(workspaceId, formId);
-        FormField field = formFieldRepository.findByIdAndFormId(fieldId, formId)
+        Form form = requireFormInWorkspace(workspaceId, formId);
+        FormField field = formFieldRepository.findByIdAndFormIdAndDeletedAtIsNull(fieldId, formId)
                 .orElseThrow(() -> new FormFieldNotFoundException(fieldId));
-        formFieldRepository.delete(field);
+        field.setDeletedAt(Instant.now());
+        formFieldRepository.save(field);
+        removeFieldFromPages(form, fieldId);
+        formRepository.save(form);
     }
 
     @Transactional
@@ -253,7 +301,8 @@ public class FormService {
         authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
         requireFormInWorkspace(workspaceId, formId);
 
-        List<FormField> existing = formFieldRepository.findAllByFormIdOrderByDisplayOrderAsc(formId);
+        List<FormField> existing =
+                formFieldRepository.findAllByFormIdAndDeletedAtIsNullOrderByDisplayOrderAsc(formId);
         if (existing.size() != request.fieldIds().size()) {
             throw new InvalidFormFieldException(
                     "La liste de réordonnancement doit contenir exactement tous les champs du formulaire.");
@@ -289,15 +338,29 @@ public class FormService {
         authorizationService.requireCanView(workspaceId, userId);
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
 
-        List<FormResultsFieldResponse> fields = form.getFields().stream()
+        List<FormResultsFieldResponse> activeFields = form.getFields().stream()
+                .filter(field -> !field.isDeleted())
                 .sorted((a, b) -> Integer.compare(a.getDisplayOrder(), b.getDisplayOrder()))
-                .map(field -> new FormResultsFieldResponse(
-                        field.getId(),
-                        field.getLabel(),
-                        field.getFieldType().name(),
-                        field.getDisplayOrder(),
-                        formMapper.parseOptions(field.getOptionsJson())))
+                .map(field -> toResultsField(field, false))
                 .toList();
+
+        // Champs retirés qui ont encore des réponses historiques.
+        List<FormResultsFieldResponse> removedFields = formFieldRepository
+                .findDeletedFieldsWithAnswersByFormId(formId)
+                .stream()
+                .sorted((a, b) -> {
+                    int byOrder = Integer.compare(a.getDisplayOrder(), b.getDisplayOrder());
+                    if (byOrder != 0) {
+                        return byOrder;
+                    }
+                    return Long.compare(a.getId(), b.getId());
+                })
+                .map(field -> toResultsField(field, true))
+                .toList();
+
+        List<FormResultsFieldResponse> fields = new ArrayList<>(activeFields.size() + removedFields.size());
+        fields.addAll(activeFields);
+        fields.addAll(removedFields);
 
         List<FormSubmission> submissions = formSubmissionRepository.findAllByFormIdWithAnswers(formId)
                 .stream()
@@ -333,6 +396,7 @@ public class FormService {
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
 
         List<FormField> orderedFields = form.getFields().stream()
+                .filter(field -> !field.isDeleted())
                 .sorted((a, b) -> Integer.compare(a.getDisplayOrder(), b.getDisplayOrder()))
                 .toList();
         int totalSteps = Math.max(1, orderedFields.size());
@@ -426,6 +490,198 @@ public class FormService {
         }
     }
 
+    private FormResultsFieldResponse toResultsField(FormField field, boolean removed) {
+        return new FormResultsFieldResponse(
+                field.getId(),
+                field.getLabel(),
+                field.getFieldType().name(),
+                field.getDisplayOrder(),
+                formMapper.parseOptions(field.getOptionsJson()),
+                removed,
+                formMapper.parseFieldSettings(field.getSettingsJson()));
+    }
+
+    @Transactional
+    public void pruneOrphanSchedulingSlots(Form form) {
+        pruneStaleFormFields(form);
+    }
+
+    @Transactional
+    public void pruneStaleFormFields(Form form) {
+        if (form == null) {
+            return;
+        }
+        if (form.getFields() == null) {
+            form.setFields(new ArrayList<>());
+        }
+        var document = formMapper.parsePagesDocument(form.getPagesJson());
+        List<FormPageDto> pages = document.pages() == null ? List.of() : document.pages();
+        Map<Long, FormField> fieldsById = new HashMap<>();
+        for (FormField field : form.getFields()) {
+            if (!field.isDeleted()) {
+                fieldsById.put(field.getId(), field);
+            }
+        }
+
+        Set<Long> assignedOnPages = new HashSet<>();
+        boolean pagesChanged = false;
+        boolean fieldsChanged = false;
+        List<FormPageDto> nextPages = new ArrayList<>();
+
+        for (FormPageDto page : pages) {
+            if (page == null) {
+                continue;
+            }
+            List<Long> fieldIds = page.fieldIds() == null ? List.of() : page.fieldIds();
+            if ("scheduling".equalsIgnoreCase(page.type())) {
+                List<Long> kept = new ArrayList<>();
+                for (Long fieldId : fieldIds) {
+                    if (fieldId == null) {
+                        continue;
+                    }
+                    FormField field = fieldsById.get(fieldId);
+                    if (field != null && isSchedulingSlotField(field)) {
+                        kept.add(fieldId);
+                        assignedOnPages.add(fieldId);
+                    }
+                }
+                if (kept.isEmpty()) {
+                    FormField slot = form.getFields().stream()
+                            .filter(field -> !field.isDeleted() && isSchedulingSlotField(field))
+                            .findFirst()
+                            .orElse(null);
+                    if (slot == null) {
+                        slot = createSchedulingSlotField(form);
+                        fieldsById.put(slot.getId(), slot);
+                        fieldsChanged = true;
+                    }
+                    if (slot.getId() != null) {
+                        kept.add(slot.getId());
+                        assignedOnPages.add(slot.getId());
+                    }
+                }
+                if (!kept.equals(fieldIds)) {
+                    pagesChanged = true;
+                    page = copyPageWithFieldIds(page, kept);
+                }
+            } else {
+                for (Long fieldId : fieldIds) {
+                    if (fieldId != null) {
+                        assignedOnPages.add(fieldId);
+                    }
+                }
+            }
+            nextPages.add(page);
+        }
+
+        Instant now = Instant.now();
+        for (FormField field : form.getFields()) {
+            if (field.isDeleted()) {
+                continue;
+            }
+            Long fieldId = field.getId();
+            if (assignedOnPages.contains(fieldId)) {
+                continue;
+            }
+            field.setDeletedAt(now);
+            fieldsChanged = true;
+        }
+
+        if (fieldsChanged) {
+            formFieldRepository.saveAll(form.getFields());
+        }
+        if (pagesChanged) {
+            form.setPagesJson(formMapper.serializePagesDocument(nextPages, document.progressBar()));
+            formRepository.save(form);
+        }
+    }
+
+    private FormField createSchedulingSlotField(Form form) {
+        int nextOrder = form.getFields().stream()
+                .filter(field -> !field.isDeleted())
+                .mapToInt(FormField::getDisplayOrder)
+                .max()
+                .orElse(-1) + 1;
+        FormField field = FormField.builder()
+                .label("Rendez-vous")
+                .fieldType(FieldType.TEXT)
+                .required(true)
+                .displayOrder(nextOrder)
+                .uiComponent("scheduling_page")
+                .settingsJson("{\"schedulingSlot\":true}")
+                .build();
+        form.addField(field);
+        return formFieldRepository.saveAndFlush(field);
+    }
+
+    private FormPageDto copyPageWithFieldIds(FormPageDto page, List<Long> fieldIds) {
+        return new FormPageDto(
+                page.id(),
+                page.type(),
+                page.title(),
+                page.navLabel(),
+                page.description(),
+                fieldIds,
+                page.buttonText(),
+                page.headerImage(),
+                page.coverLayoutMedia(),
+                page.coverImagePosition(),
+                page.customCoverLayout(),
+                page.endingConfig(),
+                page.reviewConfig(),
+                page.loginConfig(),
+                page.paymentConfig(),
+                page.contentBlocks(),
+                page.canvasOrder(),
+                page.progressStepId());
+    }
+
+    private boolean isSchedulingSlotField(FormField field) {
+        if ("scheduling_page".equalsIgnoreCase(field.getUiComponent())) {
+            return true;
+        }
+        String settings = field.getSettingsJson();
+        return settings != null && settings.contains("\"schedulingSlot\":true");
+    }
+
+    private void removeFieldFromPages(Form form, Long fieldId) {
+        var document = formMapper.parsePagesDocument(form.getPagesJson());
+        List<FormPageDto> pages = document.pages() == null ? List.of() : document.pages();
+        String fieldToken = "field:" + fieldId;
+        List<FormPageDto> nextPages = pages.stream()
+                .map(page -> {
+                    List<Long> fieldIds = page.fieldIds() == null
+                            ? List.of()
+                            : page.fieldIds().stream().filter(id -> !fieldId.equals(id)).toList();
+                    List<String> canvasOrder = page.canvasOrder() == null
+                            ? null
+                            : page.canvasOrder().stream()
+                                    .filter(token -> token == null || !token.equals(fieldToken))
+                                    .toList();
+                    return new FormPageDto(
+                            page.id(),
+                            page.type(),
+                            page.title(),
+                            page.navLabel(),
+                            page.description(),
+                            fieldIds,
+                            page.buttonText(),
+                            page.headerImage(),
+                            page.coverLayoutMedia(),
+                            page.coverImagePosition(),
+                            page.customCoverLayout(),
+                            page.endingConfig(),
+                            page.reviewConfig(),
+                            page.loginConfig(),
+                            page.paymentConfig(),
+                            page.contentBlocks(),
+                            canvasOrder,
+                            page.progressStepId());
+                })
+                .toList();
+        form.setPagesJson(formMapper.serializePagesDocument(nextPages, document.progressBar()));
+    }
+
     private FormSubmissionRowResponse toSubmissionRow(FormSubmission submission) {
         Map<Long, String> answers = new HashMap<>();
         if (submission.getAnswers() != null) {
@@ -439,6 +695,7 @@ public class FormService {
         return new FormSubmissionRowResponse(
                 submission.getId(),
                 submission.getSubmittedAt(),
+                submission.getRespondentEmail(),
                 answers);
     }
 

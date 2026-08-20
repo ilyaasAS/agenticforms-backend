@@ -25,6 +25,9 @@ public record CreateFormRequest(
         List<LogicRuleDto> logicRules,
 
         @Valid
-        List<CalculationDto> calculations
+        List<CalculationDto> calculations,
+
+        @Size(max = 32, message = "themeId must be at most 32 characters")
+        String themeId
 ) {
 }

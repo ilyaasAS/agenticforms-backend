@@ -6,6 +6,7 @@ import java.util.Map;
 public record FormSubmissionRowResponse(
         Long id,
         Instant submittedAt,
+        String respondentEmail,
         Map<Long, String> answers
 ) {
 }

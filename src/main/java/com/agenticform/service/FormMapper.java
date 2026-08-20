@@ -15,11 +15,14 @@ import com.agenticform.dto.FormPageDto;
 import com.agenticform.dto.FormResponse;
 import com.agenticform.dto.FormSummaryResponse;
 import com.agenticform.dto.LogicRuleDto;
+import com.agenticform.dto.PagesDocumentDto;
+import com.agenticform.dto.ProgressBarConfigDto;
 import com.agenticform.model.entity.FieldType;
 import com.agenticform.model.entity.Form;
 import com.agenticform.model.entity.FormField;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Component
@@ -38,13 +41,17 @@ public class FormMapper {
     };
 
     private final ObjectMapper objectMapper;
+    private final LoginConfigSupport loginConfigSupport;
 
-    public FormMapper(ObjectMapper objectMapper) {
+    public FormMapper(ObjectMapper objectMapper, LoginConfigSupport loginConfigSupport) {
         this.objectMapper = objectMapper;
+        this.loginConfigSupport = loginConfigSupport;
     }
 
     public FormSummaryResponse toSummary(Form form) {
-        int fieldCount = form.getFields() == null ? 0 : form.getFields().size();
+        int fieldCount = form.getFields() == null
+                ? 0
+                : (int) form.getFields().stream().filter(field -> !field.isDeleted()).count();
         return new FormSummaryResponse(
                 form.getId(),
                 form.getWorkspace().getId(),
@@ -73,7 +80,14 @@ public class FormMapper {
     public FormResponse toResponse(Form form) {
         List<FormFieldResponse> fields = form.getFields() == null
                 ? List.of()
-                : form.getFields().stream().map(this::toFieldResponse).toList();
+                : form.getFields().stream()
+                        .filter(field -> !field.isDeleted())
+                        .map(this::toFieldResponse)
+                        .toList();
+        PagesDocumentDto document = parsePagesDocument(form.getPagesJson());
+        List<FormPageDto> pages = document.pages() != null
+                ? loginConfigSupport.sanitizePagesForClient(document.pages())
+                : List.of();
         return new FormResponse(
                 form.getId(),
                 form.getWorkspace().getId(),
@@ -84,7 +98,9 @@ public class FormMapper {
                 fields,
                 parseLogicRules(form.getLogicRulesJson()),
                 parseCalculations(form.getCalculationsJson()),
-                parsePages(form.getPagesJson()),
+                pages,
+                form.getThemeId() != null && !form.getThemeId().isBlank() ? form.getThemeId() : "dark",
+                document.progressBar(),
                 form.getCreatedAt(),
                 form.getUpdatedAt());
     }
@@ -138,26 +154,60 @@ public class FormMapper {
     }
 
     public String serializePages(List<FormPageDto> pages) {
+        return serializePagesDocument(pages, null);
+    }
+
+    public String serializePagesDocument(List<FormPageDto> pages, ProgressBarConfigDto progressBar) {
         if (pages == null) {
             return null;
         }
         try {
-            return objectMapper.writeValueAsString(pages);
+            if (progressBar == null || !Boolean.TRUE.equals(progressBar.enabled())) {
+                return objectMapper.writeValueAsString(pages);
+            }
+            return objectMapper.writeValueAsString(new PagesDocumentDto(pages, progressBar));
         } catch (JsonProcessingException ex) {
             throw new IllegalArgumentException("Impossible de sérialiser pages.", ex);
         }
     }
 
     public List<FormPageDto> parsePages(String json) {
+        return parsePagesDocument(json).pages();
+    }
+
+    public ProgressBarConfigDto parseProgressBar(String json) {
+        return parsePagesDocument(json).progressBar();
+    }
+
+    public PagesDocumentDto parsePagesDocument(String json) {
         if (json == null || json.isBlank()) {
-            return List.of();
+            return new PagesDocumentDto(List.of(), null);
         }
         try {
-            List<FormPageDto> parsed = objectMapper.readValue(json, PAGES);
-            return parsed == null ? List.of() : List.copyOf(parsed);
-        } catch (JsonProcessingException ex) {
+            JsonNode root = objectMapper.readTree(json);
+            if (root == null || root.isNull()) {
+                return new PagesDocumentDto(List.of(), null);
+            }
+            if (root.isArray()) {
+                List<FormPageDto> pages = objectMapper.convertValue(root, PAGES);
+                return new PagesDocumentDto(pages == null ? List.of() : List.copyOf(pages), null);
+            }
+            if (root.isObject()) {
+                List<FormPageDto> pages = List.of();
+                if (root.has("pages") && root.get("pages").isArray()) {
+                    List<FormPageDto> parsed = objectMapper.convertValue(root.get("pages"), PAGES);
+                    pages = parsed == null ? List.of() : List.copyOf(parsed);
+                }
+                ProgressBarConfigDto progressBar = null;
+                if (root.has("progressBar") && !root.get("progressBar").isNull()) {
+                    progressBar = objectMapper.convertValue(root.get("progressBar"), ProgressBarConfigDto.class);
+                }
+                return new PagesDocumentDto(pages, progressBar);
+            }
+            return new PagesDocumentDto(List.of(), null);
+        } catch (JsonProcessingException | IllegalArgumentException ex) {
             log.warn("pages_json invalide, retour liste vide: {}", ex.getMessage());
-            return List.of();
+            return new PagesDocumentDto(List.of(), null);
         }
     }
 

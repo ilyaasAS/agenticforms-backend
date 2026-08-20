@@ -123,7 +123,12 @@ public class SecurityConfig {
                 .securityMatcher("/api/**")
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(csrfTokenRepository)
-                        .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler()))
+                        .csrfTokenRequestHandler(new SpaCsrfTokenRequestHandler())
+                        .ignoringRequestMatchers(
+                                "/api/v1/public/forms/*/submissions",
+                                "/api/v1/public/forms/*/session",
+                                "/api/v1/public/forms/*/login/**",
+                                "/api/v1/public/forms/*/scheduling/**"))
                 .cors(Customizer.withDefaults())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .exceptionHandling(ex -> ex
@@ -131,9 +136,25 @@ public class SecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler()))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, "/api/auth/csrf").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/public/forms/login/google/callback")
+                        .permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/forms/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/public/forms/*/submissions").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/public/forms/*/session").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/public/forms/*/login/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/public/forms/*/scheduling/**").permitAll()
+                        .requestMatchers(HttpMethod.DELETE, "/api/v1/public/forms/*/scheduling/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/public/forms/*/payments/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/integrations/calendly/callback")
+                        .permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/integrations/google-calendar/callback")
+                        .permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/integrations/stripe/callback")
+                        .permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/media/proxy").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/media/files/**").permitAll()
+                        .requestMatchers(HttpMethod.HEAD, "/api/v1/media/files/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/media/upload").permitAll()
                         .requestMatchers(HttpMethod.POST,
                                 "/api/auth/register",
                                 "/api/auth/signup",
@@ -175,7 +196,7 @@ public class SecurityConfig {
             org.springframework.security.config.annotation.web.configurers.HeadersConfigurer<HttpSecurity> headers) {
         headers
                 .contentTypeOptions(Customizer.withDefaults())
-                .frameOptions(frame -> frame.deny())
+                .frameOptions(frame -> frame.sameOrigin())
                 .httpStrictTransportSecurity(hsts -> hsts
                         .includeSubDomains(true)
                         .preload(true)

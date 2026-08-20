@@ -46,7 +46,7 @@ public class FormSession {
     @Column(name = "last_field_id")
     private Long lastFieldId;
 
-    @Column(name = "answers_json", columnDefinition = "json")
+    @Column(name = "answers_json", columnDefinition = "MEDIUMTEXT")
     private String answersJson;
 
     @Enumerated(EnumType.STRING)
@@ -54,6 +54,10 @@ public class FormSession {
     @NotNull
     @Builder.Default
     private FormSessionStatus status = FormSessionStatus.IN_PROGRESS;
+
+    /** E-mail vérifié sur la page Connexion (reprise inter-appareils). */
+    @Column(name = "respondent_email", length = 320)
+    private String respondentEmail;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

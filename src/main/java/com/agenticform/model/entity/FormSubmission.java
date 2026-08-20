@@ -48,6 +48,10 @@ public class FormSubmission {
     @Column(name = "submitted_at", nullable = false, updatable = false)
     private Instant submittedAt;
 
+    /** E-mail vérifié sur la page Connexion (si le formulaire en a une). */
+    @Column(name = "respondent_email", length = 320)
+    private String respondentEmail;
+
     @OneToMany(mappedBy = "submission", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     private List<FormSubmissionAnswer> answers = new ArrayList<>();
