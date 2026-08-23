@@ -12,7 +12,6 @@ import com.agenticform.exception.OAuthEmailNotVerifiedException;
 import com.agenticform.exception.OAuthIdentityConflictException;
 import com.agenticform.exception.OAuthLinkRequiresVerifiedEmailException;
 import com.agenticform.model.entity.AuthProvider;
-import com.agenticform.model.entity.Role;
 import com.agenticform.model.entity.User;
 import com.agenticform.model.entity.UserOAuthAccount;
 import com.agenticform.repository.UserOAuthAccountRepository;
@@ -27,16 +26,19 @@ public class OAuthUserService {
     private final UserOAuthAccountRepository oauthAccountRepository;
     private final PasswordEncoder passwordEncoder;
     private final WorkspaceService workspaceService;
+    private final AdminBootstrapService adminBootstrapService;
 
     public OAuthUserService(
             UserRepository userRepository,
             UserOAuthAccountRepository oauthAccountRepository,
             PasswordEncoder passwordEncoder,
-            WorkspaceService workspaceService) {
+            WorkspaceService workspaceService,
+            AdminBootstrapService adminBootstrapService) {
         this.userRepository = userRepository;
         this.oauthAccountRepository = oauthAccountRepository;
         this.passwordEncoder = passwordEncoder;
         this.workspaceService = workspaceService;
+        this.adminBootstrapService = adminBootstrapService;
     }
 
     @Transactional(readOnly = true)
@@ -134,7 +136,7 @@ public class OAuthUserService {
         user.setEmail(email);
         user.setFullName(fullName);
         user.setPasswordEnabled(false);
-        user.setRole(Role.ROLE_USER);
+        user.setRole(adminBootstrapService.roleForEmail(email));
         user.setPassword(passwordEncoder.encode(randomSecret()));
         user.markEmailVerified();
 

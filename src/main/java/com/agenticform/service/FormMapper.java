@@ -17,6 +17,8 @@ import com.agenticform.dto.FormSummaryResponse;
 import com.agenticform.dto.LogicRuleDto;
 import com.agenticform.dto.PagesDocumentDto;
 import com.agenticform.dto.ProgressBarConfigDto;
+import com.agenticform.dto.PublicFormFieldResponse;
+import com.agenticform.dto.PublicFormResponse;
 import com.agenticform.model.entity.FieldType;
 import com.agenticform.model.entity.Form;
 import com.agenticform.model.entity.FormField;
@@ -102,7 +104,71 @@ public class FormMapper {
                 form.getThemeId() != null && !form.getThemeId().isBlank() ? form.getThemeId() : "dark",
                 document.progressBar(),
                 form.getCreatedAt(),
+                form.getUpdatedAt(),
+                form.getPublishedAt(),
+                form.isHasUnpublishedChanges());
+    }
+
+    public PublicFormResponse toPublicResponse(Form form) {
+        List<PublicFormFieldResponse> fields = form.getFields() == null
+                ? List.of()
+                : form.getFields().stream()
+                        .filter(field -> !field.isDeleted())
+                        .sorted((a, b) -> Integer.compare(a.getDisplayOrder(), b.getDisplayOrder()))
+                        .map(this::toPublicField)
+                        .toList();
+        PagesDocumentDto document = parsePagesDocument(form.getPagesJson());
+        List<FormPageDto> pages = document.pages() != null
+                ? loginConfigSupport.sanitizePagesForClient(document.pages())
+                : List.of();
+        return new PublicFormResponse(
+                form.getId(),
+                form.getTitle(),
+                form.getDescription(),
+                form.getStatus().name(),
+                fields,
+                parseLogicRules(form.getLogicRulesJson()),
+                parseCalculations(form.getCalculationsJson()),
+                pages,
+                form.getThemeId() != null && !form.getThemeId().isBlank() ? form.getThemeId() : "dark",
+                document.progressBar(),
                 form.getUpdatedAt());
+    }
+
+    public PublicFormFieldResponse toPublicField(FormField field) {
+        return new PublicFormFieldResponse(
+                field.getId(),
+                field.getLabel(),
+                field.getFieldType().name(),
+                field.isRequired(),
+                field.getDisplayOrder(),
+                parseOptions(field.getOptionsJson()),
+                field.getPlaceholder(),
+                field.getUiComponent(),
+                parseFieldSettings(field.getSettingsJson()));
+    }
+
+    public String serializePublishedSnapshot(PublicFormResponse snapshot) {
+        if (snapshot == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(snapshot);
+        } catch (JsonProcessingException ex) {
+            throw new IllegalArgumentException("Impossible de sérialiser le snapshot publié.", ex);
+        }
+    }
+
+    public PublicFormResponse parsePublishedSnapshot(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(json, PublicFormResponse.class);
+        } catch (JsonProcessingException ex) {
+            log.warn("published_snapshot_json invalide: {}", ex.getMessage());
+            return null;
+        }
     }
 
     public String serializeLogicRules(List<LogicRuleDto> rules) {

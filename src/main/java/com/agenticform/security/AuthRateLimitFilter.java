@@ -38,16 +38,23 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
     private static final int LIMIT_RESET_PASSWORD = 10;
     private static final int LIMIT_RESEND_VERIFICATION = 5;
     private static final int LIMIT_VERIFY_EMAIL = 20;
+    private static final int LIMIT_CONTACT = 5;
+    private static final int LIMIT_CHANGE_PASSWORD = 5;
+    private static final int LIMIT_DELETE_ACCOUNT = 3;
 
     /** Store in-memory — à remplacer par Redis pour un déploiement multi-instances. */
     private final ConcurrentHashMap<String, WindowCounter> counters = new ConcurrentHashMap<>();
 
     @Override
     protected boolean shouldNotFilter(@NonNull HttpServletRequest request) {
-        if (!"POST".equalsIgnoreCase(request.getMethod())) {
+        String path = normalizedPath(request);
+        String method = request.getMethod();
+        if ("DELETE".equalsIgnoreCase(method) && path.endsWith("/api/auth/account")) {
+            return false;
+        }
+        if (!"POST".equalsIgnoreCase(method)) {
             return true;
         }
-        String path = normalizedPath(request);
         return !(path.endsWith("/api/auth/login")
                 || path.endsWith("/api/auth/login/local")
                 || path.endsWith("/api/auth/register")
@@ -57,7 +64,9 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
                 || path.endsWith("/api/auth/forgot-password")
                 || path.endsWith("/api/auth/reset-password")
                 || path.endsWith("/api/auth/resend-verification")
-                || path.endsWith("/api/auth/verify-email"));
+                || path.endsWith("/api/auth/verify-email")
+                || path.endsWith("/api/auth/change-password")
+                || path.endsWith("/api/v1/public/contact"));
     }
 
     @Override
@@ -108,12 +117,28 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
         if (path.endsWith("/api/auth/verify-email")) {
             return LIMIT_VERIFY_EMAIL;
         }
+        if (path.endsWith("/api/auth/change-password")) {
+            return LIMIT_CHANGE_PASSWORD;
+        }
+        if (path.endsWith("/api/auth/account")) {
+            return LIMIT_DELETE_ACCOUNT;
+        }
+        if (path.endsWith("/api/v1/public/contact")) {
+            return LIMIT_CONTACT;
+        }
         return LIMIT_LOGIN;
     }
 
     private static String routeBucket(String path) {
-        int idx = path.indexOf("/api/auth/");
-        return idx >= 0 ? path.substring(idx) : path;
+        int authIdx = path.indexOf("/api/auth/");
+        if (authIdx >= 0) {
+            return path.substring(authIdx);
+        }
+        int contactIdx = path.indexOf("/api/v1/public/contact");
+        if (contactIdx >= 0) {
+            return path.substring(contactIdx);
+        }
+        return path;
     }
 
     private static String normalizedPath(HttpServletRequest request) {

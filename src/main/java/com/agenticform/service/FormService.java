@@ -22,6 +22,7 @@ import com.agenticform.dto.FormSubmissionRowResponse;
 import com.agenticform.dto.FormSummaryResponse;
 import com.agenticform.dto.InProgressSessionResponse;
 import com.agenticform.dto.ProgressBarConfigDto;
+import com.agenticform.dto.PublicFormResponse;
 import com.agenticform.dto.ReorderFormFieldsRequest;
 import com.agenticform.dto.SetFormLoginPasswordRequest;
 import com.agenticform.dto.UpdateFormFieldRequest;
@@ -92,6 +93,7 @@ public class FormService {
         authorizationService.requireCanView(workspaceId, userId);
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
         pruneOrphanSchedulingSlots(form);
+        ensurePublishedSnapshot(form);
         return formMapper.toResponse(form);
     }
 
@@ -134,24 +136,26 @@ public class FormService {
     public FormResponse updateForm(Long workspaceId, Long formId, Long userId, UpdateFormRequest request) {
         authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
         Form form = requireFormInWorkspace(workspaceId, formId);
+        boolean contentChanged = false;
 
         if (request.title() != null) {
             String trimmed = request.title().trim();
             if (!trimmed.isEmpty()) {
                 form.setTitle(trimmed);
+                contentChanged = true;
             }
         }
         if (request.description() != null) {
             form.setDescription(normalizeText(request.description()));
-        }
-        if (request.status() != null) {
-            form.setStatus(request.status());
+            contentChanged = true;
         }
         if (request.logicRules() != null) {
             form.setLogicRulesJson(formMapper.serializeLogicRules(request.logicRules()));
+            contentChanged = true;
         }
         if (request.calculations() != null) {
             form.setCalculationsJson(formMapper.serializeCalculations(request.calculations()));
+            contentChanged = true;
         }
         if (request.pages() != null) {
             ProgressBarConfigDto progressBar = request.progressBar();
@@ -162,14 +166,29 @@ public class FormService {
             List<FormPageDto> mergedPages = loginConfigSupport.mergeLoginPasswordHashes(
                     existingPages, request.pages());
             form.setPagesJson(formMapper.serializePagesDocument(mergedPages, progressBar));
+            contentChanged = true;
         } else if (request.progressBar() != null) {
             List<FormPageDto> pages = formMapper.parsePages(form.getPagesJson());
             form.setPagesJson(formMapper.serializePagesDocument(pages, request.progressBar()));
+            contentChanged = true;
         }
         if (request.themeId() != null) {
             String themeId = request.themeId().trim();
             if (!themeId.isEmpty()) {
                 form.setThemeId(themeId);
+                contentChanged = true;
+            }
+        }
+
+        if (request.status() == FormStatus.PUBLISHED) {
+            // Publier = figer le brouillon actuel (y compris les champs ci-dessus).
+            applyPublishedSnapshot(form);
+        } else {
+            if (request.status() != null) {
+                form.setStatus(request.status());
+            }
+            if (contentChanged) {
+                markDraftChanged(form);
             }
         }
 
@@ -177,6 +196,82 @@ public class FormService {
         return formMapper.toResponse(
                 formRepository.findByIdAndWorkspaceIdWithFields(saved.getId(), workspaceId)
                         .orElse(saved));
+    }
+
+    /**
+     * Publie le brouillon : le lien public sert désormais ce snapshot jusqu’au prochain Publish.
+     */
+    @Transactional
+    public FormResponse publishForm(Long workspaceId, Long formId, Long userId) {
+        authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
+        Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
+        applyPublishedSnapshot(form);
+        Form saved = formRepository.save(form);
+        return formMapper.toResponse(
+                formRepository.findByIdAndWorkspaceIdWithFields(saved.getId(), workspaceId)
+                        .orElse(saved));
+    }
+
+    /** Aperçu éditeur : payload public construit depuis le brouillon (pas le snapshot). */
+    @Transactional(readOnly = true)
+    public PublicFormResponse getDraftAsPublic(Long workspaceId, Long formId, Long userId) {
+        authorizationService.requireCanView(workspaceId, userId);
+        Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
+        return formMapper.toPublicResponse(form);
+    }
+
+    void applyPublishedSnapshot(Form form) {
+        Instant now = Instant.now();
+        PublicFormResponse live = formMapper.toPublicResponse(form);
+        PublicFormResponse snapshot = new PublicFormResponse(
+                live.id(),
+                live.title(),
+                live.description(),
+                FormStatus.PUBLISHED.name(),
+                live.fields(),
+                live.logicRules(),
+                live.calculations(),
+                live.pages(),
+                live.themeId(),
+                live.progressBar(),
+                now);
+        form.setPublishedSnapshotJson(formMapper.serializePublishedSnapshot(snapshot));
+        form.setPublishedAt(now);
+        form.setStatus(FormStatus.PUBLISHED);
+        form.setHasUnpublishedChanges(false);
+    }
+
+    void markDraftChanged(Form form) {
+        form.setHasUnpublishedChanges(true);
+    }
+
+    void ensurePublishedSnapshot(Form form) {
+        if (form.getStatus() != FormStatus.PUBLISHED) {
+            return;
+        }
+        if (form.getPublishedSnapshotJson() != null && !form.getPublishedSnapshotJson().isBlank()) {
+            return;
+        }
+        // Backfill legacy : fige l’état actuel sans toucher hasUnpublishedChanges.
+        Instant at = form.getUpdatedAt() != null ? form.getUpdatedAt() : Instant.now();
+        PublicFormResponse live = formMapper.toPublicResponse(form);
+        PublicFormResponse snapshot = new PublicFormResponse(
+                live.id(),
+                live.title(),
+                live.description(),
+                FormStatus.PUBLISHED.name(),
+                live.fields(),
+                live.logicRules(),
+                live.calculations(),
+                live.pages(),
+                live.themeId(),
+                live.progressBar(),
+                at);
+        form.setPublishedSnapshotJson(formMapper.serializePublishedSnapshot(snapshot));
+        if (form.getPublishedAt() == null) {
+            form.setPublishedAt(at);
+        }
+        formRepository.save(form);
     }
 
     @Transactional
@@ -188,6 +283,7 @@ public class FormService {
         authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
         formLoginService.setLoginPassword(form, request.password());
+        markDraftChanged(form);
         Form saved = formRepository.save(form);
         return formMapper.toResponse(
                 formRepository.findByIdAndWorkspaceIdWithFields(saved.getId(), workspaceId)
@@ -226,6 +322,8 @@ public class FormService {
         FormField field = buildField(request, nextOrder);
         field.setForm(form);
         FormField saved = formFieldRepository.save(field);
+        markDraftChanged(form);
+        formRepository.save(form);
 
         return formMapper.toFieldResponse(saved);
     }
@@ -238,7 +336,7 @@ public class FormService {
             Long userId,
             UpdateFormFieldRequest request) {
         authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
-        requireFormInWorkspace(workspaceId, formId);
+        Form form = requireFormInWorkspace(workspaceId, formId);
 
         FormField field = formFieldRepository.findByIdAndFormIdAndDeletedAtIsNull(fieldId, formId)
                 .orElseThrow(() -> new FormFieldNotFoundException(fieldId));
@@ -259,7 +357,11 @@ public class FormService {
             field.setDisplayOrder(request.displayOrder());
         }
         if (request.placeholder() != null) {
-            field.setPlaceholder(normalizeText(request.placeholder()));
+            String normalizedPlaceholder = normalizeText(request.placeholder());
+            field.setPlaceholder(
+                    normalizedPlaceholder == null || normalizedPlaceholder.isBlank()
+                            ? null
+                            : normalizedPlaceholder);
         }
         if (request.uiComponent() != null) {
             String ui = request.uiComponent().trim();
@@ -277,6 +379,8 @@ public class FormService {
         }
 
         FormField saved = formFieldRepository.save(field);
+        markDraftChanged(form);
+        formRepository.save(form);
         return formMapper.toFieldResponse(saved);
     }
 
@@ -289,6 +393,7 @@ public class FormService {
         field.setDeletedAt(Instant.now());
         formFieldRepository.save(field);
         removeFieldFromPages(form, fieldId);
+        markDraftChanged(form);
         formRepository.save(form);
     }
 
@@ -299,7 +404,7 @@ public class FormService {
             Long userId,
             ReorderFormFieldsRequest request) {
         authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
-        requireFormInWorkspace(workspaceId, formId);
+        Form form = requireFormInWorkspace(workspaceId, formId);
 
         List<FormField> existing =
                 formFieldRepository.findAllByFormIdAndDeletedAtIsNullOrderByDisplayOrderAsc(formId);
@@ -329,6 +434,8 @@ public class FormService {
             reordered.add(field);
         }
         formFieldRepository.saveAll(reordered);
+        markDraftChanged(form);
+        formRepository.save(form);
 
         return reordered.stream().map(formMapper::toFieldResponse).toList();
     }
@@ -464,6 +571,7 @@ public class FormService {
                     Math.max(1, totalSteps),
                     progressPercent,
                     answers != null ? answers : Map.of(),
+                    session != null ? session.getRespondentEmail() : null,
                     session != null ? session.getUpdatedAt() : null,
                     session != null ? session.getCreatedAt() : null);
         } catch (RuntimeException ex) {
@@ -485,6 +593,7 @@ public class FormService {
                     Math.max(1, totalSteps),
                     0.0,
                     Map.of(),
+                    session != null ? session.getRespondentEmail() : null,
                     session != null ? session.getUpdatedAt() : null,
                     session != null ? session.getCreatedAt() : null);
         }
@@ -534,18 +643,25 @@ public class FormService {
             }
             List<Long> fieldIds = page.fieldIds() == null ? List.of() : page.fieldIds();
             if ("scheduling".equalsIgnoreCase(page.type())) {
+                // Fillout-like : conserver créneau + champs custom de la page de réservation.
                 List<Long> kept = new ArrayList<>();
+                boolean hasSlot = false;
                 for (Long fieldId : fieldIds) {
                     if (fieldId == null) {
                         continue;
                     }
                     FormField field = fieldsById.get(fieldId);
-                    if (field != null && isSchedulingSlotField(field)) {
-                        kept.add(fieldId);
-                        assignedOnPages.add(fieldId);
+                    if (field == null) {
+                        pagesChanged = true;
+                        continue;
+                    }
+                    kept.add(fieldId);
+                    assignedOnPages.add(fieldId);
+                    if (isSchedulingSlotField(field)) {
+                        hasSlot = true;
                     }
                 }
-                if (kept.isEmpty()) {
+                if (!hasSlot) {
                     FormField slot = form.getFields().stream()
                             .filter(field -> !field.isDeleted() && isSchedulingSlotField(field))
                             .findFirst()
@@ -555,9 +671,10 @@ public class FormService {
                         fieldsById.put(slot.getId(), slot);
                         fieldsChanged = true;
                     }
-                    if (slot.getId() != null) {
-                        kept.add(slot.getId());
+                    if (slot.getId() != null && !kept.contains(slot.getId())) {
+                        kept.add(0, slot.getId());
                         assignedOnPages.add(slot.getId());
+                        pagesChanged = true;
                     }
                 }
                 if (!kept.equals(fieldIds)) {
@@ -603,7 +720,7 @@ public class FormService {
                 .max()
                 .orElse(-1) + 1;
         FormField field = FormField.builder()
-                .label("Rendez-vous")
+                .label("Créneau")
                 .fieldType(FieldType.TEXT)
                 .required(true)
                 .displayOrder(nextOrder)

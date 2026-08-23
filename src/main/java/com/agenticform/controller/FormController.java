@@ -76,6 +76,24 @@ public class FormController {
                 formService.updateForm(workspaceId, formId, requireUserId(principal), request));
     }
 
+    @PostMapping("/{formId}/publish")
+    public ResponseEntity<FormResponse> publishForm(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long workspaceId,
+            @PathVariable Long formId) {
+        return ResponseEntity.ok(
+                formService.publishForm(workspaceId, formId, requireUserId(principal)));
+    }
+
+    @GetMapping("/{formId}/draft-preview")
+    public ResponseEntity<com.agenticform.dto.PublicFormResponse> draftPreview(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long workspaceId,
+            @PathVariable Long formId) {
+        return ResponseEntity.ok(
+                formService.getDraftAsPublic(workspaceId, formId, requireUserId(principal)));
+    }
+
     @PostMapping("/{formId}/login-password")
     public ResponseEntity<FormResponse> setLoginPassword(
             @AuthenticationPrincipal UserPrincipal principal,

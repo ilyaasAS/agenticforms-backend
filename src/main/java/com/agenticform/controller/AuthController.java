@@ -11,12 +11,15 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.agenticform.dto.AuthResponse;
 import com.agenticform.dto.AuthSessionResult;
+import com.agenticform.dto.ChangePasswordRequest;
+import com.agenticform.dto.DeleteAccountRequest;
 import com.agenticform.dto.ForgotPasswordRequest;
 import com.agenticform.dto.LocalLoginRequest;
 import com.agenticform.dto.LocalLoginResponse;
@@ -30,6 +33,7 @@ import com.agenticform.dto.ResendVerificationRequest;
 import com.agenticform.dto.ResetPasswordRequest;
 import com.agenticform.dto.SignupRequest;
 import com.agenticform.dto.SignupResponse;
+import com.agenticform.dto.UpdateProfileRequest;
 import com.agenticform.dto.UserProfileResponse;
 import com.agenticform.dto.VerifyEmailRequest;
 import com.agenticform.security.AuthCookieService;
@@ -150,6 +154,16 @@ public class AuthController {
         return ResponseEntity.ok(authService.me(principal));
     }
 
+    @PutMapping("/me")
+    public ResponseEntity<UserProfileResponse> updateProfile(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody UpdateProfileRequest request) {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        return ResponseEntity.ok(authService.updateProfile(principal, request));
+    }
+
     @DeleteMapping("/oauth/{provider}")
     public ResponseEntity<UserProfileResponse> unlinkOAuthProvider(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -158,6 +172,39 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
         return ResponseEntity.ok(authService.unlinkOAuthProvider(principal, provider));
+    }
+
+    @PostMapping("/change-password")
+    public ResponseEntity<MessageResponse> changePassword(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody ChangePasswordRequest request,
+            HttpServletRequest httpRequest,
+            HttpServletResponse httpResponse) {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        AuthSessionResult session = authService.changePassword(principal, request);
+        authCookieService.setAccessToken(httpRequest, httpResponse, session.accessToken());
+        return ResponseEntity.ok(new MessageResponse("Mot de passe mis à jour."));
+    }
+
+    @DeleteMapping("/account")
+    public ResponseEntity<Void> deleteAccount(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @Valid @RequestBody DeleteAccountRequest request,
+            HttpServletRequest httpRequest,
+            HttpServletResponse httpResponse) {
+        if (principal == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        authService.deleteAccount(principal, request.confirmEmail());
+        authCookieService.clearAccessToken(httpRequest, httpResponse);
+        SecurityContextHolder.clearContext();
+        HttpSession session = httpRequest.getSession(false);
+        if (session != null) {
+            session.invalidate();
+        }
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/verify-email")

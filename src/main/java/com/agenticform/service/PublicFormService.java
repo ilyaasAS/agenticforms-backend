@@ -236,25 +236,14 @@ public class PublicFormService {
     @Transactional
     public PublicFormResponse getPublishedForm(Long formId) {
         Form form = requirePublishedForm(formId);
-        formService.pruneOrphanSchedulingSlots(form);
+        formService.ensurePublishedSnapshot(form);
         formRepository.incrementViewCount(formId);
-        List<PublicFormFieldResponse> fields = form.getFields().stream()
-                .filter(field -> !field.isDeleted())
-                .sorted((a, b) -> Integer.compare(a.getDisplayOrder(), b.getDisplayOrder()))
-                .map(this::toPublicField)
-                .toList();
-        return new PublicFormResponse(
-                form.getId(),
-                form.getTitle(),
-                form.getDescription(),
-                form.getStatus().name(),
-                fields,
-                formMapper.parseLogicRules(form.getLogicRulesJson()),
-                formMapper.parseCalculations(form.getCalculationsJson()),
-                loginConfigSupport.sanitizePagesForClient(formMapper.parsePages(form.getPagesJson())),
-                form.getThemeId() != null && !form.getThemeId().isBlank() ? form.getThemeId() : "dark",
-                formMapper.parseProgressBar(form.getPagesJson()),
-                form.getUpdatedAt());
+        PublicFormResponse snapshot = formMapper.parsePublishedSnapshot(form.getPublishedSnapshotJson());
+        if (snapshot != null) {
+            return snapshot;
+        }
+        // Repli legacy (ne devrait plus arriver après ensurePublishedSnapshot)
+        return formMapper.toPublicResponse(form);
     }
 
     @Transactional
@@ -583,31 +572,39 @@ public class PublicFormService {
         Map<String, String> urlParams = request.urlParams() != null ? request.urlParams() : Map.of();
         Map<String, String> contactParams = resolveContactFromAuth();
         Map<String, String> calcValues = CalculationEvaluator.evaluate(
-                formMapper.parseCalculations(form.getCalculationsJson()),
+                formMapper.parseCalculations(publishedCalculationsJson(form)),
                 answersByString,
                 urlParams,
                 contactParams
         );
 
         Set<Long> assignedSchedulingFieldIds = assignedSchedulingFieldIds(form);
+        PublicFormResponse published = publishedSnapshot(form);
+        List<PublicFormFieldResponse> requiredSource = published != null && published.fields() != null
+                ? published.fields()
+                : fieldsById.values().stream().map(formMapper::toPublicField).toList();
 
-        for (FormField field : form.getFields()) {
-            if (field.isDeleted()) {
+        for (PublicFormFieldResponse publishedField : requiredSource) {
+            if (publishedField == null || !publishedField.required()) {
                 continue;
             }
-            if (field.isRequired()) {
-                if (isOrphanSchedulingSlot(form, field, assignedSchedulingFieldIds)) {
-                    continue;
-                }
-                FieldSettingsDto settings = formMapper.parseFieldSettings(field.getSettingsJson());
-                if (!VisibilityLogicEvaluator.isFieldVisible(settings, answersByString, urlParams, contactParams, calcValues)) {
-                    continue;
-                }
-                String value = valuesByFieldId.get(field.getId());
-                if (value == null || value.isBlank() || isEmptyPhoneAnswer(field, value)) {
-                    throw new InvalidSubmissionException(
-                            "Le champ « " + field.getLabel() + " » est obligatoire.");
-                }
+            FormField field = fieldsById.get(publishedField.id());
+            if (field == null) {
+                continue;
+            }
+            if (isOrphanSchedulingSlot(form, field, assignedSchedulingFieldIds)) {
+                continue;
+            }
+            FieldSettingsDto settings = publishedField.settings() != null
+                    ? publishedField.settings()
+                    : formMapper.parseFieldSettings(field.getSettingsJson());
+            if (!VisibilityLogicEvaluator.isFieldVisible(settings, answersByString, urlParams, contactParams, calcValues)) {
+                continue;
+            }
+            String value = valuesByFieldId.get(field.getId());
+            if (value == null || value.isBlank() || isEmptyPhoneAnswer(field, value)) {
+                throw new InvalidSubmissionException(
+                        "Le champ « " + publishedField.label() + " » est obligatoire.");
             }
         }
 
@@ -731,12 +728,33 @@ public class PublicFormService {
         if (form.getStatus() != FormStatus.PUBLISHED) {
             throw new FormNotAvailableException(formId);
         }
+        formService.ensurePublishedSnapshot(form);
         return form;
+    }
+
+    private PublicFormResponse publishedSnapshot(Form form) {
+        return formMapper.parsePublishedSnapshot(form.getPublishedSnapshotJson());
+    }
+
+    private String publishedPagesJson(Form form) {
+        PublicFormResponse snapshot = publishedSnapshot(form);
+        if (snapshot != null) {
+            return formMapper.serializePagesDocument(snapshot.pages(), snapshot.progressBar());
+        }
+        return form.getPagesJson();
+    }
+
+    private String publishedCalculationsJson(Form form) {
+        PublicFormResponse snapshot = publishedSnapshot(form);
+        if (snapshot != null) {
+            return formMapper.serializeCalculations(snapshot.calculations());
+        }
+        return form.getCalculationsJson();
     }
 
     private Set<Long> assignedSchedulingFieldIds(Form form) {
         Set<Long> ids = new HashSet<>();
-        for (var page : formMapper.parsePages(form.getPagesJson())) {
+        for (var page : formMapper.parsePages(publishedPagesJson(form))) {
             if (page == null || !"scheduling".equalsIgnoreCase(page.type()) || page.fieldIds() == null) {
                 continue;
             }
@@ -798,14 +816,32 @@ public class PublicFormService {
     }
 
     private Map<Long, FormField> indexFields(Form form) {
-        Map<Long, FormField> fieldsById = new HashMap<>();
+        Map<Long, FormField> allById = new HashMap<>();
         for (FormField field : form.getFields()) {
-            if (field.isDeleted()) {
+            allById.put(field.getId(), field);
+        }
+        PublicFormResponse snapshot = publishedSnapshot(form);
+        if (snapshot == null || snapshot.fields() == null) {
+            Map<Long, FormField> fieldsById = new HashMap<>();
+            for (FormField field : form.getFields()) {
+                if (field.isDeleted()) {
+                    continue;
+                }
+                fieldsById.put(field.getId(), field);
+            }
+            return fieldsById;
+        }
+        Map<Long, FormField> published = new LinkedHashMap<>();
+        for (PublicFormFieldResponse publishedField : snapshot.fields()) {
+            if (publishedField == null || publishedField.id() == null) {
                 continue;
             }
-            fieldsById.put(field.getId(), field);
+            FormField field = allById.get(publishedField.id());
+            if (field != null) {
+                published.put(field.getId(), field);
+            }
         }
-        return fieldsById;
+        return published;
     }
 
     private Long resolveLastFieldId(Map<Long, FormField> fieldsById, Long lastFieldId) {
@@ -1538,7 +1574,7 @@ public class PublicFormService {
     }
 
     private boolean formHasLoginPage(Form form) {
-        PagesDocumentDto document = formMapper.parsePagesDocument(form.getPagesJson());
+        PagesDocumentDto document = formMapper.parsePagesDocument(publishedPagesJson(form));
         if (document == null || document.pages() == null) {
             return false;
         }
@@ -1551,7 +1587,7 @@ public class PublicFormService {
     }
 
     private LoginConfigDto loginConfigForForm(Form form) {
-        PagesDocumentDto document = formMapper.parsePagesDocument(form.getPagesJson());
+        PagesDocumentDto document = formMapper.parsePagesDocument(publishedPagesJson(form));
         if (document == null || document.pages() == null) {
             return null;
         }

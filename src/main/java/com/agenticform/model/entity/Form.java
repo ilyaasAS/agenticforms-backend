@@ -103,6 +103,20 @@ public class Form {
     @Builder.Default
     private String themeId = "dark";
 
+    /**
+     * Snapshot JSON de la dernière version publiée (PublicFormResponse).
+     * Le brouillon reste dans title/pages/fields ; le lien public lit ce snapshot.
+     */
+    @Column(name = "published_snapshot_json", columnDefinition = "LONGTEXT")
+    private String publishedSnapshotJson;
+
+    @Column(name = "published_at")
+    private Instant publishedAt;
+
+    @Column(name = "has_unpublished_changes", nullable = false)
+    @Builder.Default
+    private boolean hasUnpublishedChanges = true;
+
     @PrePersist
     void onCreate() {
         Instant now = Instant.now();

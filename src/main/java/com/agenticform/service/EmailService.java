@@ -6,8 +6,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 
 @Service
 public class EmailService {
@@ -17,13 +21,118 @@ public class EmailService {
 
     private final JavaMailSender mailSender;
     private final String fromAddress;
+    private final String contactInbox;
 
     public EmailService(
             JavaMailSender mailSender,
-            @Value("${app.mail.from:no-reply@agenticforms.com}") String fromAddress) {
+            @Value("${app.mail.from:no-reply@agenticforms.com}") String fromAddress,
+            @Value("${app.mail.contact-to:contact@agenticforms.com}") String contactInbox) {
         this.mailSender = mailSender;
         this.fromAddress = resolveFrom(fromAddress);
-        log.info("EmailService initialized with from={}", this.fromAddress);
+        this.contactInbox = resolveFrom(contactInbox);
+        log.info("EmailService initialized with from={} contactTo={}", this.fromAddress, this.contactInbox);
+    }
+
+    /**
+     * Notification humaine d'un message Contact (persisté en Mongo côté API).
+     * Best-effort — l'échec SMTP ne doit pas faire échouer l'envoi du formulaire.
+     */
+    public void notifyContactInbox(
+            String senderName,
+            String senderEmail,
+            String subject,
+            String body) {
+        String safeName = senderName != null ? senderName.trim() : "";
+        String safeEmail = senderEmail != null ? senderEmail.trim() : "";
+        String safeSubject = subject != null ? subject.trim() : "Sans objet";
+        String safeBody = body != null ? body.trim() : "";
+
+        String plainText = """
+                Bonjour,
+
+                Vous avez reçu un nouveau message via le formulaire de contact AgenticForms.
+
+                De : %s <%s>
+                Objet : %s
+
+                Message :
+                %s
+
+                Vous pouvez répondre directement à cet e-mail pour contacter %s.
+
+                — L’équipe AgenticForms
+                """.formatted(safeName, safeEmail, safeSubject, safeBody, safeName);
+
+        String html = """
+                <div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55;color:#111827;">
+                  <p style="margin:0 0 16px;">Bonjour,</p>
+                  <p style="margin:0 0 20px;">Vous avez reçu un nouveau message via le formulaire de contact <strong>AgenticForms</strong>.</p>
+                  <table role="presentation" style="border-collapse:collapse;width:100%%;max-width:560px;margin:0 0 20px;">
+                    <tr>
+                      <td style="padding:8px 0;color:#6b7280;width:90px;vertical-align:top;">De</td>
+                      <td style="padding:8px 0;"><strong>%s</strong><br><a href="mailto:%s" style="color:#2563eb;text-decoration:none;">%s</a></td>
+                    </tr>
+                    <tr>
+                      <td style="padding:8px 0;color:#6b7280;vertical-align:top;">Objet</td>
+                      <td style="padding:8px 0;">%s</td>
+                    </tr>
+                  </table>
+                  <div style="padding:16px 18px;border:1px solid #e5e7eb;border-radius:12px;background:#f9fafb;white-space:pre-wrap;">%s</div>
+                  <p style="margin:20px 0 0;color:#6b7280;font-size:13px;">Répondez directement à cet e-mail pour contacter %s.</p>
+                  <p style="margin:24px 0 0;color:#9ca3af;font-size:12px;">— L’équipe AgenticForms</p>
+                </div>
+                """.formatted(
+                escapeHtml(safeName),
+                escapeHtml(safeEmail),
+                escapeHtml(safeEmail),
+                escapeHtml(safeSubject),
+                escapeHtml(safeBody),
+                escapeHtml(safeName));
+
+        try {
+            MimeMessage mimeMessage = mailSender.createMimeMessage();
+            MimeMessageHelper helper = new MimeMessageHelper(mimeMessage, true, "UTF-8");
+            helper.setFrom(fromAddress);
+            helper.setTo(contactInbox);
+            if (StringUtils.hasText(safeEmail)) {
+                helper.setReplyTo(safeEmail);
+            }
+            helper.setSubject("Nouveau message de contact — " + safeSubject);
+            helper.setText(plainText, html);
+            sendQuietly(mimeMessage, "contact-inbox", contactInbox);
+        } catch (MessagingException ex) {
+            log.warn("E-mail contact-inbox non préparé pour {}: {}", contactInbox, ex.getMessage());
+        }
+    }
+
+    /** Réponse admin vers l'auteur du message Contact (visible dans Mailpit en local). */
+    public void sendContactReply(
+            String toEmail,
+            String recipientName,
+            String originalSubject,
+            String originalBody,
+            String replyBody) {
+        if (!StringUtils.hasText(toEmail)) {
+            throw new IllegalArgumentException("L'e-mail du destinataire est manquant.");
+        }
+        String hello = StringUtils.hasText(recipientName) ? recipientName.trim() : "bonjour";
+        String subject = StringUtils.hasText(originalSubject) ? originalSubject.trim() : "votre message";
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setFrom(fromAddress);
+        message.setTo(toEmail.trim());
+        message.setSubject("Re: " + subject);
+        message.setText("""
+                Bonjour %s,
+
+                %s
+
+                ---
+                Votre message :
+                %s
+
+                — L’équipe AgenticForms
+                """.formatted(hello, replyBody.trim(), originalBody == null ? "" : originalBody.trim()));
+        send(message, "contact-reply", toEmail);
     }
 
     public void sendPasswordResetEmail(String toEmail, String resetLink) {
@@ -364,6 +473,14 @@ public class EmailService {
         }
     }
 
+    private void sendQuietly(MimeMessage message, String kind, String toEmail) {
+        try {
+            send(message, kind, toEmail);
+        } catch (RuntimeException ex) {
+            log.warn("E-mail {} non envoyé à {}: {}", kind, toEmail, ex.getMessage());
+        }
+    }
+
     private static String safeTitle(String title) {
         return StringUtils.hasText(title) ? title.trim() : "Rendez-vous";
     }
@@ -382,6 +499,34 @@ public class EmailService {
                     kind, toEmail, fromAddress, ex);
             throw ex;
         }
+    }
+
+    private void send(MimeMessage message, String kind, String toEmail) {
+        log.info("SMTP send start kind={} to={} from={}", kind, toEmail, fromAddress);
+        try {
+            mailSender.send(message);
+            log.info("SMTP send success kind={} to={}", kind, toEmail);
+        } catch (MailException ex) {
+            log.error("SMTP send failed kind={} to={} from={}: {}",
+                    kind, toEmail, fromAddress, ex.getMessage(), ex);
+            throw ex;
+        } catch (RuntimeException ex) {
+            log.error("SMTP send unexpected failure kind={} to={} from={}",
+                    kind, toEmail, fromAddress, ex);
+            throw ex;
+        }
+    }
+
+    private static String escapeHtml(String value) {
+        if (value == null || value.isEmpty()) {
+            return "";
+        }
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     private static String resolveFrom(String configured) {

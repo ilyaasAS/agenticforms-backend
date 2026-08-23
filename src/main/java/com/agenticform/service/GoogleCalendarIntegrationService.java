@@ -455,19 +455,32 @@ public class GoogleCalendarIntegrationService {
                 invitedGuests == null ? List.of() : invitedGuests, guestName, guestEmail);
     }
 
+    /**
+     * Liste les réservations Google Calendar (passé récent + à venir)
+     * pour alimenter les onglets Passés / À venir du dashboard.
+     */
     public List<Map<String, String>> listUpcomingBookings(Long userId, String calendarId) {
         IntegrationConnection connection = requireConnection(userId);
         String token = validAccessToken(connection);
         String effectiveCalendarId = StringUtils.hasText(calendarId) ? calendarId : defaultCalendarId(connection);
         String encodedCalendarId = UriUtils.encodePathSegment(effectiveCalendarId, StandardCharsets.UTF_8);
-        String timeMin = ZonedDateTime.now(ZoneOffset.UTC).format(DateTimeFormatter.ISO_INSTANT);
+
+        ZonedDateTime now = ZonedDateTime.now(ZoneOffset.UTC);
+        String timeMin = now.minusDays(60).format(DateTimeFormatter.ISO_INSTANT);
+        String timeMax = now.plusDays(180).format(DateTimeFormatter.ISO_INSTANT);
         String uri = CALENDAR_API + "/calendars/" + encodedCalendarId
-                + "/events?maxResults=50&singleEvents=true&orderBy=startTime&timeMin=" + timeMin;
+                + "/events?maxResults=100&singleEvents=true&orderBy=startTime"
+                + "&timeMin=" + UriUtils.encodeQueryParam(timeMin, StandardCharsets.UTF_8)
+                + "&timeMax=" + UriUtils.encodeQueryParam(timeMax, StandardCharsets.UTF_8);
+
         JsonNode root = googleGet(uri, token);
         List<Map<String, String>> result = new ArrayList<>();
         JsonNode items = root.path("items");
         if (items.isArray()) {
             for (JsonNode item : items) {
+                if ("cancelled".equalsIgnoreCase(item.path("status").asText(""))) {
+                    continue;
+                }
                 Map<String, String> entry = new LinkedHashMap<>();
                 entry.put("eventId", item.path("id").asText(null));
                 entry.put("summary", item.path("summary").asText(""));

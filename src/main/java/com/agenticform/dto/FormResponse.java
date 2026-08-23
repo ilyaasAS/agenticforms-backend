@@ -17,6 +17,8 @@ public record FormResponse(
         String themeId,
         ProgressBarConfigDto progressBar,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        Instant publishedAt,
+        boolean hasUnpublishedChanges
 ) {
 }

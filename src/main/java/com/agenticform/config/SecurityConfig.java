@@ -139,6 +139,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/forms/login/google/callback")
                         .permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/public/forms/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/public/contact").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/public/forms/*/submissions").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/public/forms/*/session").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/public/forms/*/login/**").permitAll()
@@ -154,7 +155,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/v1/media/proxy").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/media/files/**").permitAll()
                         .requestMatchers(HttpMethod.HEAD, "/api/v1/media/files/**").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/media/upload").permitAll()
+                        .requestMatchers("/api/v1/admin/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST,
                                 "/api/auth/register",
                                 "/api/auth/signup",

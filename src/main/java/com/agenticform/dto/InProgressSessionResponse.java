@@ -12,6 +12,7 @@ public record InProgressSessionResponse(
         int totalSteps,
         double progressPercent,
         Map<Long, String> answers,
+        String respondentEmail,
         Instant updatedAt,
         Instant createdAt
 ) {

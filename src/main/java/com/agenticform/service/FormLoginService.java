@@ -104,7 +104,7 @@ public class FormLoginService {
         if (!StringUtils.hasText(plainPassword)) {
             throw new IllegalArgumentException("Indiquez un mot de passe.");
         }
-        LoginConfigDto config = loginConfig(form);
+        LoginConfigDto config = loginConfigFromPagesJson(form.getPagesJson());
         if (config == null) {
             throw new IllegalArgumentException("Ce formulaire n'a pas de page Connexion.");
         }
@@ -148,8 +148,21 @@ public class FormLoginService {
         return String.format("%06d", value);
     }
 
+    /** Config login pour le lien public (snapshot publié si présent). */
     private LoginConfigDto loginConfig(Form form) {
-        PagesDocumentDto document = formMapper.parsePagesDocument(form.getPagesJson());
+        return loginConfigFromPagesJson(publishedPagesJson(form));
+    }
+
+    private String publishedPagesJson(Form form) {
+        var snapshot = formMapper.parsePublishedSnapshot(form.getPublishedSnapshotJson());
+        if (snapshot != null) {
+            return formMapper.serializePagesDocument(snapshot.pages(), snapshot.progressBar());
+        }
+        return form.getPagesJson();
+    }
+
+    private LoginConfigDto loginConfigFromPagesJson(String pagesJson) {
+        PagesDocumentDto document = formMapper.parsePagesDocument(pagesJson);
         if (document == null || document.pages() == null) {
             return null;
         }

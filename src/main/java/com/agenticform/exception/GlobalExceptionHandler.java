@@ -66,6 +66,17 @@ public class GlobalExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, "Le nouveau mot de passe doit être différent de l'ancien.");
     }
 
+    @ExceptionHandler(InvalidCurrentPasswordException.class)
+    public ResponseEntity<Map<String, Object>> handleInvalidCurrentPassword(InvalidCurrentPasswordException ex) {
+        return error(HttpStatus.BAD_REQUEST, "Mot de passe actuel incorrect.");
+    }
+
+    @ExceptionHandler(AccountDeleteConfirmationException.class)
+    public ResponseEntity<Map<String, Object>> handleAccountDeleteConfirmation(
+            AccountDeleteConfirmationException ex) {
+        return error(HttpStatus.BAD_REQUEST, "L'e-mail de confirmation ne correspond pas à votre compte.");
+    }
+
     @ExceptionHandler({EmailNotVerifiedException.class, PasswordLoginDisabledException.class})
     public ResponseEntity<Map<String, Object>> handleLoginStateEnumeration(RuntimeException ex) {
         // Anti-énumération : même 401 générique que mauvais mot de passe / e-mail inconnu.
@@ -132,6 +143,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(FormNotFoundException.class)
     public ResponseEntity<Map<String, Object>> handleFormNotFound(FormNotFoundException ex) {
         return error(HttpStatus.NOT_FOUND, "Formulaire introuvable.");
+    }
+
+    @ExceptionHandler(ContactMessageNotFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleContactMessageNotFound(ContactMessageNotFoundException ex) {
+        return error(HttpStatus.NOT_FOUND, "Message de contact introuvable.");
     }
 
     @ExceptionHandler(FormNotAvailableException.class)

@@ -8,6 +8,7 @@ public record WorkspaceMemberResponse(
         String email,
         String fullName,
         String role,
-        LocalDateTime joinedAt
+        LocalDateTime joinedAt,
+        boolean calendarConnected
 ) {
 }

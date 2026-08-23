@@ -1,7 +1,9 @@
 package com.agenticform.service;
 
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,30 +19,37 @@ import com.agenticform.model.entity.User;
 import com.agenticform.model.entity.Workspace;
 import com.agenticform.model.entity.WorkspaceMember;
 import com.agenticform.model.entity.WorkspaceRole;
+import com.agenticform.repository.IntegrationConnectionRepository;
 import com.agenticform.repository.UserRepository;
 import com.agenticform.repository.WorkspaceMemberRepository;
+import com.agenticform.service.GoogleCalendarIntegrationService;
 
 @Service
 public class WorkspaceMemberService {
 
     private final WorkspaceMemberRepository workspaceMemberRepository;
     private final UserRepository userRepository;
+    private final IntegrationConnectionRepository integrationConnectionRepository;
     private final WorkspaceAuthorizationService authorizationService;
 
     public WorkspaceMemberService(
             WorkspaceMemberRepository workspaceMemberRepository,
             UserRepository userRepository,
+            IntegrationConnectionRepository integrationConnectionRepository,
             WorkspaceAuthorizationService authorizationService) {
         this.workspaceMemberRepository = workspaceMemberRepository;
         this.userRepository = userRepository;
+        this.integrationConnectionRepository = integrationConnectionRepository;
         this.authorizationService = authorizationService;
     }
 
     @Transactional(readOnly = true)
     public List<WorkspaceMemberResponse> listMembers(Long workspaceId, Long userId) {
         authorizationService.requireCanView(workspaceId, userId);
-        return workspaceMemberRepository.findAllByWorkspaceId(workspaceId).stream()
-                .map(this::toResponse)
+        List<WorkspaceMember> members = workspaceMemberRepository.findAllByWorkspaceId(workspaceId);
+        Set<Long> calendarConnectedUserIds = loadCalendarConnectedUserIds(members);
+        return members.stream()
+                .map((member) -> toResponse(member, calendarConnectedUserIds))
                 .sorted(Comparator.comparing(WorkspaceMemberResponse::email, String.CASE_INSENSITIVE_ORDER))
                 .toList();
     }
@@ -70,7 +79,8 @@ public class WorkspaceMemberService {
         workspace.addMember(member);
 
         WorkspaceMember saved = workspaceMemberRepository.save(member);
-        return toResponse(saved);
+        Set<Long> calendarConnectedUserIds = loadCalendarConnectedUserIds(List.of(saved));
+        return toResponse(saved, calendarConnectedUserIds);
     }
 
     @Transactional
@@ -87,7 +97,9 @@ public class WorkspaceMemberService {
                 .orElseThrow(WorkspaceMemberNotFoundException::new);
 
         target.setRole(request.role());
-        return toResponse(workspaceMemberRepository.save(target));
+        WorkspaceMember saved = workspaceMemberRepository.save(target);
+        Set<Long> calendarConnectedUserIds = loadCalendarConnectedUserIds(List.of(saved));
+        return toResponse(saved, calendarConnectedUserIds);
     }
 
     @Transactional
@@ -101,7 +113,20 @@ public class WorkspaceMemberService {
         workspaceMemberRepository.delete(target);
     }
 
-    private WorkspaceMemberResponse toResponse(WorkspaceMember member) {
+    private Set<Long> loadCalendarConnectedUserIds(List<WorkspaceMember> members) {
+        if (members.isEmpty()) {
+            return Set.of();
+        }
+        List<Long> userIds = members.stream()
+                .map((member) -> member.getUser().getId())
+                .toList();
+        return new HashSet<>(
+                integrationConnectionRepository.findConnectedUserIds(
+                        userIds,
+                        GoogleCalendarIntegrationService.PROVIDER));
+    }
+
+    private WorkspaceMemberResponse toResponse(WorkspaceMember member, Set<Long> calendarConnectedUserIds) {
         User user = member.getUser();
         return new WorkspaceMemberResponse(
                 member.getId(),
@@ -109,7 +134,8 @@ public class WorkspaceMemberService {
                 user.getEmail(),
                 user.getFullName(),
                 member.getRole().name(),
-                member.getJoinedAt());
+                member.getJoinedAt(),
+                calendarConnectedUserIds.contains(user.getId()));
     }
 
     private String normalizeEmail(String email) {

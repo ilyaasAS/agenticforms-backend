@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.agenticform.dto.AuthResponse;
 import com.agenticform.dto.AuthSessionResult;
+import com.agenticform.dto.ChangePasswordRequest;
 import com.agenticform.dto.LocalLoginRequest;
 import com.agenticform.dto.LocalLoginResponse;
 import com.agenticform.dto.LoginRequest;
@@ -21,16 +22,26 @@ import com.agenticform.dto.OAuth2LoginResponse;
 import com.agenticform.dto.RegisterRequest;
 import com.agenticform.dto.SignupRequest;
 import com.agenticform.dto.SignupResponse;
+import com.agenticform.dto.UpdateProfileRequest;
 import com.agenticform.dto.UserProfileResponse;
+import com.agenticform.exception.AccountDeleteConfirmationException;
+import com.agenticform.exception.InvalidCurrentPasswordException;
 import com.agenticform.exception.InvalidOAuthCodeException;
 import com.agenticform.exception.LastAuthMethodException;
 import com.agenticform.exception.OAuthLinkNotFoundException;
+import com.agenticform.exception.SamePasswordException;
 import com.agenticform.model.entity.AuthProvider;
-import com.agenticform.model.entity.Role;
 import com.agenticform.model.entity.User;
 import com.agenticform.model.entity.UserOAuthAccount;
+import com.agenticform.model.entity.WorkspaceMember;
+import com.agenticform.model.entity.WorkspaceRole;
+import com.agenticform.repository.EmailVerificationTokenRepository;
+import com.agenticform.repository.IntegrationConnectionRepository;
+import com.agenticform.repository.PasswordResetTokenRepository;
 import com.agenticform.repository.UserOAuthAccountRepository;
 import com.agenticform.repository.UserRepository;
+import com.agenticform.repository.WorkspaceMemberRepository;
+import com.agenticform.repository.WorkspaceRepository;
 import com.agenticform.security.JwtTokenProvider;
 import com.agenticform.security.OAuthCodeStore;
 import com.agenticform.security.UserPrincipal;
@@ -46,6 +57,12 @@ public class AuthService {
     private final OAuthCodeStore oauthCodeStore;
     private final EmailVerificationService emailVerificationService;
     private final WorkspaceService workspaceService;
+    private final WorkspaceMemberRepository workspaceMemberRepository;
+    private final WorkspaceRepository workspaceRepository;
+    private final IntegrationConnectionRepository integrationConnectionRepository;
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final EmailVerificationTokenRepository emailVerificationTokenRepository;
+    private final AdminBootstrapService adminBootstrapService;
 
     public AuthService(
             UserRepository userRepository,
@@ -55,7 +72,13 @@ public class AuthService {
             AuthenticationManager authenticationManager,
             OAuthCodeStore oauthCodeStore,
             EmailVerificationService emailVerificationService,
-            WorkspaceService workspaceService) {
+            WorkspaceService workspaceService,
+            WorkspaceMemberRepository workspaceMemberRepository,
+            WorkspaceRepository workspaceRepository,
+            IntegrationConnectionRepository integrationConnectionRepository,
+            PasswordResetTokenRepository passwordResetTokenRepository,
+            EmailVerificationTokenRepository emailVerificationTokenRepository,
+            AdminBootstrapService adminBootstrapService) {
         this.userRepository = userRepository;
         this.oauthAccountRepository = oauthAccountRepository;
         this.passwordEncoder = passwordEncoder;
@@ -64,6 +87,12 @@ public class AuthService {
         this.oauthCodeStore = oauthCodeStore;
         this.emailVerificationService = emailVerificationService;
         this.workspaceService = workspaceService;
+        this.workspaceMemberRepository = workspaceMemberRepository;
+        this.workspaceRepository = workspaceRepository;
+        this.integrationConnectionRepository = integrationConnectionRepository;
+        this.passwordResetTokenRepository = passwordResetTokenRepository;
+        this.emailVerificationTokenRepository = emailVerificationTokenRepository;
+        this.adminBootstrapService = adminBootstrapService;
     }
 
     /**
@@ -83,7 +112,7 @@ public class AuthService {
         User user = new User();
         user.setEmail(email);
         user.setPassword(passwordEncoder.encode(request.password()));
-        user.setRole(Role.ROLE_USER);
+        user.setRole(adminBootstrapService.roleForEmail(email));
         user.setPasswordEnabled(true);
         user.setEmailVerified(false);
 
@@ -105,7 +134,7 @@ public class AuthService {
         user.setEmail(email);
         user.setPassword(passwordEncoder.encode(request.password()));
         user.setFullName(request.fullName());
-        user.setRole(Role.ROLE_USER);
+        user.setRole(adminBootstrapService.roleForEmail(email));
         user.setPasswordEnabled(true);
         user.setEmailVerified(false);
 
@@ -192,6 +221,19 @@ public class AuthService {
     }
 
     @Transactional
+    public UserProfileResponse updateProfile(UserPrincipal principal, UpdateProfileRequest request) {
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
+
+        String first = request.firstName().trim().replaceAll("\\s+", " ");
+        String last = request.lastName().trim().replaceAll("\\s+", " ");
+        user.setFullName((first + " " + last).trim());
+
+        User saved = userRepository.save(user);
+        return toProfile(saved);
+    }
+
+    @Transactional
     public UserProfileResponse unlinkOAuthProvider(UserPrincipal principal, String providerParam) {
         String providerKey = normalizeOAuthProvider(providerParam);
         User user = userRepository.findById(principal.getId())
@@ -209,6 +251,77 @@ public class AuthService {
         user.removeOAuthAccount(link);
         userRepository.save(user);
         return toProfile(user);
+    }
+
+    /**
+     * Change ou définit le mot de passe du compte connecté.
+     * Invalide les anciennes sessions JWT et renvoie un nouvel access token.
+     */
+    @Transactional
+    public AuthSessionResult changePassword(UserPrincipal principal, ChangePasswordRequest request) {
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
+
+        String newPassword = request.newPassword();
+        if (passwordEncoder.matches(newPassword, user.getPassword())) {
+            throw new SamePasswordException();
+        }
+
+        if (user.isPasswordEnabled()) {
+            String current = request.currentPassword();
+            if (current == null || current.isBlank()
+                    || !passwordEncoder.matches(current, user.getPassword())) {
+                throw new InvalidCurrentPasswordException();
+            }
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setPasswordEnabled(true);
+        user.setTokenVersion(user.getTokenVersion() + 1);
+        User saved = userRepository.save(user);
+
+        String token = jwtTokenProvider.generateToken(saved);
+        return toAuthSession(token, saved);
+    }
+
+    /**
+     * Supprime définitivement le compte et les espaces dont l'utilisateur est propriétaire.
+     */
+    @Transactional
+    public void deleteAccount(UserPrincipal principal, String confirmEmail) {
+        User user = userRepository.findById(principal.getId())
+                .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
+
+        String expected = normalizeEmail(user.getEmail());
+        String provided = normalizeEmail(confirmEmail);
+        if (expected == null || provided == null || !expected.equals(provided)) {
+            throw new AccountDeleteConfirmationException();
+        }
+
+        java.util.List<WorkspaceMember> memberships =
+                new java.util.ArrayList<>(workspaceMemberRepository.findAllByUserId(user.getId()));
+
+        java.util.List<Long> ownedWorkspaceIds = memberships.stream()
+                .filter(m -> m.getRole() == WorkspaceRole.OWNER)
+                .map(m -> m.getWorkspace().getId())
+                .distinct()
+                .toList();
+
+        for (Long workspaceId : ownedWorkspaceIds) {
+            workspaceMemberRepository.deleteAll(
+                    workspaceMemberRepository.findAllByWorkspaceId(workspaceId));
+            workspaceRepository.deleteById(workspaceId);
+        }
+
+        // Recharger les memberships restants (espaces où l'utilisateur n'était pas owner).
+        for (WorkspaceMember membership : workspaceMemberRepository.findAllByUserId(user.getId())) {
+            workspaceMemberRepository.delete(membership);
+        }
+
+        integrationConnectionRepository.deleteByUserId(user.getId());
+        passwordResetTokenRepository.deleteByUser(user);
+        emailVerificationTokenRepository.deleteByUser(user);
+        userRepository.delete(user);
     }
 
     private UserProfileResponse toProfile(User user) {
