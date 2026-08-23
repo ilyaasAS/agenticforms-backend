@@ -1,11 +1,13 @@
 package com.agenticform.security;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Date;
 
 import javax.crypto.SecretKey;
 
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import com.agenticform.model.entity.User;
@@ -25,15 +27,43 @@ import io.jsonwebtoken.security.SignatureException;
 public class JwtTokenProvider {
 
     public static final String CLAIM_TOKEN_VERSION = "tv";
+    /** HS256 exige ≥ 256 bits (32 octets) ; on impose ≥ 32 caractères en prod. */
+    public static final int MIN_SECRET_LENGTH = 32;
 
     private final SecretKey secretKey;
     private final long expirationMs;
 
     public JwtTokenProvider(
             @Value("${jwt.secret}") String secret,
-            @Value("${jwt.expiration-ms}") long expirationMs) {
+            @Value("${jwt.expiration-ms}") long expirationMs,
+            Environment environment) {
+        validateSecretForProfiles(secret, environment.getActiveProfiles());
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expirationMs = expirationMs;
+    }
+
+    /**
+     * En profil {@code prod} : refuse de démarrer si le secret est absent ou trop court.
+     * Hors prod, JJWT rejettera toujours une clé &lt; 32 octets via {@link Keys#hmacShaKeyFor}.
+     */
+    static void validateSecretForProfiles(String secret, String... activeProfiles) {
+        boolean prod = Arrays.stream(activeProfiles == null ? new String[0] : activeProfiles)
+                .anyMatch("prod"::equalsIgnoreCase);
+        if (!prod) {
+            return;
+        }
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException(
+                    "jwt.secret (JWT_SECRET) est obligatoire en production.");
+        }
+        if (secret.length() < MIN_SECRET_LENGTH) {
+            throw new IllegalStateException(
+                    "jwt.secret (JWT_SECRET) doit contenir au moins "
+                            + MIN_SECRET_LENGTH
+                            + " caractères en production (HS256). Longueur actuelle : "
+                            + secret.length()
+                            + ".");
+        }
     }
 
     public long getExpirationMs() {

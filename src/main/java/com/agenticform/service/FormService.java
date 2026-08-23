@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,6 +39,7 @@ import com.agenticform.model.entity.FormSessionStatus;
 import com.agenticform.model.entity.FormStatus;
 import com.agenticform.model.entity.FormSubmission;
 import com.agenticform.model.entity.FormSubmissionAnswer;
+import com.agenticform.model.entity.Role;
 import com.agenticform.model.entity.User;
 import com.agenticform.model.entity.Workspace;
 import com.agenticform.repository.FormFieldRepository;
@@ -82,7 +84,7 @@ public class FormService {
 
     @Transactional(readOnly = true)
     public List<FormSummaryResponse> listForms(Long workspaceId, Long userId) {
-        authorizationService.requireCanView(workspaceId, userId);
+        requireFormView(workspaceId, userId);
         return formRepository.findAllByWorkspaceIdOrderByUpdatedAtDesc(workspaceId).stream()
                 .map(form -> formMapper.toSummary(form, formFieldRepository.countByFormIdAndDeletedAtIsNull(form.getId())))
                 .toList();
@@ -90,7 +92,7 @@ public class FormService {
 
     @Transactional
     public FormResponse getForm(Long workspaceId, Long formId, Long userId) {
-        authorizationService.requireCanView(workspaceId, userId);
+        requireFormView(workspaceId, userId);
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
         pruneOrphanSchedulingSlots(form);
         ensurePublishedSnapshot(form);
@@ -99,7 +101,7 @@ public class FormService {
 
     @Transactional
     public FormResponse createForm(Long workspaceId, Long userId, CreateFormRequest request) {
-        authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
+        requireFormWrite(workspaceId, userId);
         Workspace workspace = authorizationService.requireExistingWorkspace(workspaceId);
         User creator = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalStateException("User not found: id=" + userId));
@@ -133,8 +135,64 @@ public class FormService {
     }
 
     @Transactional
+    public FormResponse duplicateForm(Long workspaceId, Long formId, Long userId) {
+        requireFormWrite(workspaceId, userId);
+        Form source = requireFormInWorkspaceWithFields(workspaceId, formId);
+        User creator = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalStateException("User not found: id=" + userId));
+
+        Form copy = Form.builder()
+                .workspace(source.getWorkspace())
+                .title(duplicateTitle(source.getTitle()))
+                .description(source.getDescription())
+                .status(FormStatus.DRAFT)
+                .createdBy(creator)
+                .themeId(source.getThemeId() != null && !source.getThemeId().isBlank()
+                        ? source.getThemeId()
+                        : "dark")
+                .logicRulesJson(source.getLogicRulesJson())
+                .calculationsJson(source.getCalculationsJson())
+                .pagesJson(source.getPagesJson())
+                .hasUnpublishedChanges(true)
+                .build();
+
+        List<FormField> sourceFields = source.getFields() == null
+                ? List.of()
+                : source.getFields().stream().filter(field -> !field.isDeleted()).toList();
+        for (FormField field : sourceFields) {
+            copy.addField(cloneField(field));
+        }
+
+        Form saved = formRepository.saveAndFlush(copy);
+        Map<Long, Long> fieldIdMap = new LinkedHashMap<>();
+        List<FormField> copiedFields = saved.getFields() == null ? List.of() : saved.getFields();
+        int limit = Math.min(sourceFields.size(), copiedFields.size());
+        for (int i = 0; i < limit; i++) {
+            Long oldId = sourceFields.get(i).getId();
+            Long newId = copiedFields.get(i).getId();
+            if (oldId != null && newId != null) {
+                fieldIdMap.put(oldId, newId);
+            }
+        }
+
+        if (!fieldIdMap.isEmpty()) {
+            saved.setPagesJson(formMapper.remapFieldIds(saved.getPagesJson(), fieldIdMap));
+            saved.setLogicRulesJson(formMapper.remapFieldIds(saved.getLogicRulesJson(), fieldIdMap));
+            saved.setCalculationsJson(formMapper.remapFieldIds(saved.getCalculationsJson(), fieldIdMap));
+            for (FormField field : copiedFields) {
+                field.setSettingsJson(formMapper.remapFieldIds(field.getSettingsJson(), fieldIdMap));
+            }
+            saved = formRepository.save(saved);
+        }
+
+        return formMapper.toResponse(
+                formRepository.findByIdAndWorkspaceIdWithFields(saved.getId(), workspaceId)
+                        .orElse(saved));
+    }
+
+    @Transactional
     public FormResponse updateForm(Long workspaceId, Long formId, Long userId, UpdateFormRequest request) {
-        authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
+        requireFormWrite(workspaceId, userId);
         Form form = requireFormInWorkspace(workspaceId, formId);
         boolean contentChanged = false;
 
@@ -203,7 +261,7 @@ public class FormService {
      */
     @Transactional
     public FormResponse publishForm(Long workspaceId, Long formId, Long userId) {
-        authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
+        requireFormWrite(workspaceId, userId);
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
         applyPublishedSnapshot(form);
         Form saved = formRepository.save(form);
@@ -215,7 +273,7 @@ public class FormService {
     /** Aperçu éditeur : payload public construit depuis le brouillon (pas le snapshot). */
     @Transactional(readOnly = true)
     public PublicFormResponse getDraftAsPublic(Long workspaceId, Long formId, Long userId) {
-        authorizationService.requireCanView(workspaceId, userId);
+        requireFormView(workspaceId, userId);
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
         return formMapper.toPublicResponse(form);
     }
@@ -280,7 +338,7 @@ public class FormService {
             Long formId,
             Long userId,
             SetFormLoginPasswordRequest request) {
-        authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
+        requireFormWrite(workspaceId, userId);
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
         formLoginService.setLoginPassword(form, request.password());
         markDraftChanged(form);
@@ -292,14 +350,14 @@ public class FormService {
 
     @Transactional
     public void deleteForm(Long workspaceId, Long formId, Long userId) {
-        authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
+        requireFormWrite(workspaceId, userId);
         Form form = requireFormInWorkspace(workspaceId, formId);
         formRepository.delete(form);
     }
 
     @Transactional(readOnly = true)
     public List<FormFieldResponse> listFields(Long workspaceId, Long formId, Long userId) {
-        authorizationService.requireCanView(workspaceId, userId);
+        requireFormView(workspaceId, userId);
         requireFormInWorkspace(workspaceId, formId);
         return formFieldRepository.findAllByFormIdAndDeletedAtIsNullOrderByDisplayOrderAsc(formId).stream()
                 .map(formMapper::toFieldResponse)
@@ -312,7 +370,7 @@ public class FormService {
             Long formId,
             Long userId,
             CreateFormFieldRequest request) {
-        authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
+        requireFormWrite(workspaceId, userId);
         Form form = requireFormInWorkspace(workspaceId, formId);
 
         int nextOrder = request.displayOrder() != null
@@ -335,7 +393,7 @@ public class FormService {
             Long fieldId,
             Long userId,
             UpdateFormFieldRequest request) {
-        authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
+        requireFormWrite(workspaceId, userId);
         Form form = requireFormInWorkspace(workspaceId, formId);
 
         FormField field = formFieldRepository.findByIdAndFormIdAndDeletedAtIsNull(fieldId, formId)
@@ -386,7 +444,7 @@ public class FormService {
 
     @Transactional
     public void deleteField(Long workspaceId, Long formId, Long fieldId, Long userId) {
-        authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
+        requireFormWrite(workspaceId, userId);
         Form form = requireFormInWorkspace(workspaceId, formId);
         FormField field = formFieldRepository.findByIdAndFormIdAndDeletedAtIsNull(fieldId, formId)
                 .orElseThrow(() -> new FormFieldNotFoundException(fieldId));
@@ -403,7 +461,7 @@ public class FormService {
             Long formId,
             Long userId,
             ReorderFormFieldsRequest request) {
-        authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
+        requireFormWrite(workspaceId, userId);
         Form form = requireFormInWorkspace(workspaceId, formId);
 
         List<FormField> existing =
@@ -442,7 +500,7 @@ public class FormService {
 
     @Transactional(readOnly = true)
     public FormResultsResponse getFormResults(Long workspaceId, Long formId, Long userId) {
-        authorizationService.requireCanView(workspaceId, userId);
+        requireFormView(workspaceId, userId);
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
 
         List<FormResultsFieldResponse> activeFields = form.getFields().stream()
@@ -499,7 +557,7 @@ public class FormService {
             Long workspaceId,
             Long formId,
             Long userId) {
-        authorizationService.requireCanView(workspaceId, userId);
+        requireFormView(workspaceId, userId);
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
 
         List<FormField> orderedFields = form.getFields().stream()
@@ -816,6 +874,28 @@ public class FormService {
                 answers);
     }
 
+    private static String duplicateTitle(String title) {
+        String base = title == null || title.isBlank() ? "Formulaire" : title.trim();
+        String suffix = " (copie)";
+        if (base.length() + suffix.length() <= 255) {
+            return base + suffix;
+        }
+        return base.substring(0, Math.max(0, 255 - suffix.length())) + suffix;
+    }
+
+    private FormField cloneField(FormField source) {
+        return FormField.builder()
+                .label(source.getLabel())
+                .fieldType(source.getFieldType())
+                .required(source.isRequired())
+                .displayOrder(source.getDisplayOrder())
+                .optionsJson(source.getOptionsJson())
+                .placeholder(source.getPlaceholder())
+                .uiComponent(source.getUiComponent())
+                .settingsJson(source.getSettingsJson())
+                .build();
+    }
+
     private FormField buildField(CreateFormFieldRequest request, int fallbackOrder) {
         validateOptions(request.fieldType(), request.options());
 
@@ -840,6 +920,31 @@ public class FormService {
             throw new InvalidFormFieldException(
                     "Les champs de type choix doivent contenir au moins une option.");
         }
+    }
+
+    private void requireFormView(Long workspaceId, Long userId) {
+        if (isPlatformAdmin(userId)) {
+            authorizationService.requireExistingWorkspace(workspaceId);
+            return;
+        }
+        authorizationService.requireCanView(workspaceId, userId);
+    }
+
+    private void requireFormWrite(Long workspaceId, Long userId) {
+        if (isPlatformAdmin(userId)) {
+            authorizationService.requireExistingWorkspace(workspaceId);
+            return;
+        }
+        authorizationService.requireCanUpdateWorkspace(workspaceId, userId);
+    }
+
+    private boolean isPlatformAdmin(Long userId) {
+        if (userId == null) {
+            return false;
+        }
+        return userRepository.findById(userId)
+                .map(user -> user.getRole() == Role.ROLE_ADMIN)
+                .orElse(false);
     }
 
     private Form requireFormInWorkspace(Long workspaceId, Long formId) {

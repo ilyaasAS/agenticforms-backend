@@ -117,6 +117,11 @@ public class Form {
     @Builder.Default
     private boolean hasUnpublishedChanges = true;
 
+    /** Formulaire bloqué par un admin : lien public indisponible. */
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean blocked = false;
+
     @PrePersist
     void onCreate() {
         Instant now = Instant.now();

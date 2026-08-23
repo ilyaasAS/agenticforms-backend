@@ -33,7 +33,7 @@ public class RecaptchaService {
     private final HttpClient httpClient;
 
     public RecaptchaService(
-            @Value("${RECAPTCHA_SECRET_KEY:}") String secretKey,
+            @Value("${app.recaptcha.secret-key:}") String secretKey,
             ObjectMapper objectMapper) {
         this.secretKey = secretKey == null || secretKey.isBlank() ? GOOGLE_TEST_SECRET : secretKey.trim();
         this.objectMapper = objectMapper;

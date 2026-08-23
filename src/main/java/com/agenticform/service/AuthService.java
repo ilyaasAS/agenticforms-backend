@@ -152,7 +152,9 @@ public class AuthService {
         String email = normalizeEmail(request.email());
 
         User existing = userRepository.findByEmail(email).orElse(null);
-        if (existing != null && (!existing.isPasswordEnabled() || !existing.isEmailVerified())) {
+        if (existing != null && (existing.isBlocked()
+                || !existing.isPasswordEnabled()
+                || !existing.isEmailVerified())) {
             throw new BadCredentialsException("Invalid credentials");
         }
 
@@ -163,7 +165,7 @@ public class AuthService {
         User user = userRepository.findById(principal.getId())
                 .orElseThrow(() -> new IllegalStateException("Authenticated user not found"));
 
-        if (!user.isPasswordEnabled() || !user.isEmailVerified()) {
+        if (user.isBlocked() || !user.isPasswordEnabled() || !user.isEmailVerified()) {
             throw new BadCredentialsException("Invalid credentials");
         }
 
@@ -187,6 +189,10 @@ public class AuthService {
         Long userId = jwtTokenProvider.getUserIdFromToken(jwt);
         User user = userRepository.findById(userId)
                 .orElseThrow(InvalidOAuthCodeException::new);
+
+        if (user.isBlocked()) {
+            throw new InvalidOAuthCodeException();
+        }
 
         if (jwtTokenProvider.getTokenVersionFromToken(jwt) != user.getTokenVersion()) {
             throw new InvalidOAuthCodeException();
@@ -298,6 +304,12 @@ public class AuthService {
             throw new AccountDeleteConfirmationException();
         }
 
+        deleteUserAndOwnedWorkspaces(user);
+    }
+
+    /** Suppression admin ou auto-suppression de compte (espaces dont l'user est owner inclus). */
+    @Transactional
+    public void deleteUserAndOwnedWorkspaces(User user) {
         java.util.List<WorkspaceMember> memberships =
                 new java.util.ArrayList<>(workspaceMemberRepository.findAllByUserId(user.getId()));
 
@@ -313,7 +325,6 @@ public class AuthService {
             workspaceRepository.deleteById(workspaceId);
         }
 
-        // Recharger les memberships restants (espaces où l'utilisateur n'était pas owner).
         for (WorkspaceMember membership : workspaceMemberRepository.findAllByUserId(user.getId())) {
             workspaceMemberRepository.delete(membership);
         }

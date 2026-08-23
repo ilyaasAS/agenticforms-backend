@@ -11,6 +11,7 @@ public record FormSummaryResponse(
         int fieldCount,
         Long createdById,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        boolean scheduling
 ) {
 }

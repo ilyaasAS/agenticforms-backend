@@ -3,6 +3,7 @@ package com.agenticform.controller;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.springframework.http.MediaType.APPLICATION_JSON;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -124,5 +125,13 @@ class ContactInboxControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("READ"));
+    }
+
+    @Test
+    void adminDeleteRemovesMessage() throws Exception {
+        mockMvc.perform(delete("/api/v1/admin/contact-messages/mongo-1"))
+                .andExpect(status().isNoContent());
+
+        verify(contactService).delete("mongo-1");
     }
 }

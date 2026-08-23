@@ -71,6 +71,11 @@ public class ContactService {
         return toResponse(contactMessageRepository.save(doc));
     }
 
+    public void delete(String id) {
+        ContactMessage doc = requireMessage(id);
+        contactMessageRepository.delete(doc);
+    }
+
     private ContactMessage requireMessage(String id) {
         return contactMessageRepository.findById(id)
                 .orElseThrow(() -> new ContactMessageNotFoundException(id));

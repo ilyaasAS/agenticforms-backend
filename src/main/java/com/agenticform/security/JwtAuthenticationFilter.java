@@ -80,6 +80,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     return;
                 }
 
+                if (!userDetails.isEnabled()) {
+                    authCookieService.clearAccessToken(request, response);
+                    if (isPublicAuthEndpoint(request)) {
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
+                    writeUnauthorized(response);
+                    return;
+                }
+
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(
                                 userDetails,

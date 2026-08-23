@@ -96,6 +96,16 @@ public class GlobalExceptionHandler {
                 "Vérifiez d’abord votre e-mail avant de lier un compte social.");
     }
 
+    @ExceptionHandler(AdminCommandForbiddenException.class)
+    public ResponseEntity<Map<String, Object>> handleAdminCommandForbidden(AdminCommandForbiddenException ex) {
+        return error(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
+    @ExceptionHandler(AdminEmailTakenException.class)
+    public ResponseEntity<Map<String, Object>> handleAdminEmailTaken(AdminEmailTakenException ex) {
+        return error(HttpStatus.CONFLICT, "Cet e-mail est déjà utilisé.");
+    }
+
     @ExceptionHandler(WorkspaceNotFoundException.class)
     public ResponseEntity<Map<String, Object>> handleWorkspaceNotFound(WorkspaceNotFoundException ex) {
         return error(HttpStatus.NOT_FOUND, "Espace de travail introuvable.");
@@ -138,6 +148,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(UserNotFoundByEmailException.class)
     public ResponseEntity<Map<String, Object>> handleUserNotFoundByEmail(UserNotFoundByEmailException ex) {
         return error(HttpStatus.NOT_FOUND, "Aucun utilisateur trouvé avec cet e-mail.");
+    }
+
+    @ExceptionHandler(UserAccountNotFoundException.class)
+    public ResponseEntity<Map<String, Object>> handleUserAccountNotFound(UserAccountNotFoundException ex) {
+        return error(HttpStatus.NOT_FOUND, "Utilisateur introuvable.");
     }
 
     @ExceptionHandler(FormNotFoundException.class)

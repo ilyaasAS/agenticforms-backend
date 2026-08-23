@@ -95,6 +95,11 @@ public class User {
     @NotNull
     private Role role = Role.ROLE_USER;
 
+    /** Compte bloqué par un admin : plus de login ni de session JWT. */
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean blocked = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

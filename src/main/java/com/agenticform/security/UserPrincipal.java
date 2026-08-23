@@ -15,6 +15,7 @@ public class UserPrincipal implements UserDetails {
     private final String email;
     private final String password;
     private final int tokenVersion;
+    private final boolean blocked;
     private final Collection<? extends GrantedAuthority> authorities;
 
     public UserPrincipal(
@@ -22,11 +23,13 @@ public class UserPrincipal implements UserDetails {
             String email,
             String password,
             int tokenVersion,
+            boolean blocked,
             Collection<? extends GrantedAuthority> authorities) {
         this.id = id;
         this.email = email;
         this.password = password;
         this.tokenVersion = tokenVersion;
+        this.blocked = blocked;
         this.authorities = authorities;
     }
 
@@ -38,6 +41,7 @@ public class UserPrincipal implements UserDetails {
                 user.getEmail(),
                 user.getPassword(),
                 user.getTokenVersion(),
+                user.isBlocked(),
                 authorities);
     }
 
@@ -85,6 +89,6 @@ public class UserPrincipal implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return true;
+        return !blocked;
     }
 }

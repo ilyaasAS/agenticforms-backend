@@ -89,4 +89,15 @@ class ContactServiceTest {
         given(contactMessageRepository.findById("missing")).willReturn(Optional.empty());
         assertThrows(ContactMessageNotFoundException.class, () -> contactService.get("missing"));
     }
+
+    @Test
+    void deleteRemovesMongoDocument() {
+        ContactMessage existing = new ContactMessage("Ada", "ada@example.com", "Aide", "Bonjour");
+        existing.setId("mongo-1");
+        given(contactMessageRepository.findById("mongo-1")).willReturn(Optional.of(existing));
+
+        contactService.delete("mongo-1");
+
+        verify(contactMessageRepository).delete(existing);
+    }
 }

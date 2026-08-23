@@ -85,6 +85,15 @@ public class FormController {
                 formService.publishForm(workspaceId, formId, requireUserId(principal)));
     }
 
+    @PostMapping("/{formId}/duplicate")
+    public ResponseEntity<FormResponse> duplicateForm(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @PathVariable Long workspaceId,
+            @PathVariable Long formId) {
+        FormResponse response = formService.duplicateForm(workspaceId, formId, requireUserId(principal));
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
     @GetMapping("/{formId}/draft-preview")
     public ResponseEntity<com.agenticform.dto.PublicFormResponse> draftPreview(
             @AuthenticationPrincipal UserPrincipal principal,

@@ -63,7 +63,8 @@ public class FormMapper {
                 fieldCount,
                 form.getCreatedBy() != null ? form.getCreatedBy().getId() : null,
                 form.getCreatedAt(),
-                form.getUpdatedAt());
+                form.getUpdatedAt(),
+                hasSchedulingPage(form));
     }
 
     public FormSummaryResponse toSummary(Form form, int fieldCount) {
@@ -76,7 +77,8 @@ public class FormMapper {
                 fieldCount,
                 form.getCreatedBy() != null ? form.getCreatedBy().getId() : null,
                 form.getCreatedAt(),
-                form.getUpdatedAt());
+                form.getUpdatedAt(),
+                hasSchedulingPage(form));
     }
 
     public FormResponse toResponse(Form form) {
@@ -245,6 +247,15 @@ public class FormMapper {
         return parsePagesDocument(json).progressBar();
     }
 
+    private boolean hasSchedulingPage(Form form) {
+        PagesDocumentDto document = parsePagesDocument(form.getPagesJson());
+        if (document.pages() == null || document.pages().isEmpty()) {
+            return false;
+        }
+        return document.pages().stream()
+                .anyMatch(page -> page.type() != null && page.type().equalsIgnoreCase("scheduling"));
+    }
+
     public PagesDocumentDto parsePagesDocument(String json) {
         if (json == null || json.isBlank()) {
             return new PagesDocumentDto(List.of(), null);
@@ -291,6 +302,10 @@ public class FormMapper {
                 parseFieldSettings(field.getSettingsJson()),
                 field.getCreatedAt(),
                 field.getUpdatedAt());
+    }
+
+    public String remapFieldIds(String json, Map<Long, Long> fieldIdMap) {
+        return FieldIdRemapper.remap(objectMapper, json, fieldIdMap);
     }
 
     public String serializeFieldSettings(FieldSettingsDto settings) {

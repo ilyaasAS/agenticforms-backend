@@ -109,6 +109,11 @@ public class OAuth2AuthenticationSuccessHandler extends SimpleUrlAuthenticationS
             OAuthUserResult result = oauthUserService.findOrCreateOAuthUser(
                     email, fullName, provider, subject, emailVerified);
             User user = result.user();
+            if (user.isBlocked()) {
+                log.info("OAuth2 blocked account id={}", user.getId());
+                redirectToLoginError(request, response, "account_blocked");
+                return;
+            }
             String jwt = jwtTokenProvider.generateToken(user);
             String oneTimeCode = oauthCodeStore.issue(jwt);
 

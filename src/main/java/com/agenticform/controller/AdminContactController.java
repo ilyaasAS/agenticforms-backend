@@ -3,6 +3,7 @@ package com.agenticform.controller;
 import java.util.List;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -50,5 +51,11 @@ public class AdminContactController {
             @PathVariable("id") String id,
             @Valid @RequestBody ContactReplyRequest request) {
         return ResponseEntity.ok(contactService.reply(id, request.body()));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable("id") String id) {
+        contactService.delete(id);
+        return ResponseEntity.noContent().build();
     }
 }

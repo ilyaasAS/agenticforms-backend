@@ -34,6 +34,15 @@ public interface FormRepository extends JpaRepository<Form, Long> {
             """)
     Optional<Form> findByIdWithFields(@Param("id") Long id);
 
+    @Query("""
+            SELECT DISTINCT f FROM Form f
+            JOIN FETCH f.workspace w
+            JOIN FETCH w.owner
+            LEFT JOIN FETCH f.createdBy
+            ORDER BY f.updatedAt DESC
+            """)
+    List<Form> findAllForAdmin();
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("UPDATE Form f SET f.viewCount = f.viewCount + 1 WHERE f.id = :id")
     int incrementViewCount(@Param("id") Long id);

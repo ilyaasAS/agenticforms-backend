@@ -552,7 +552,8 @@ public class PublicFormService {
             validateValue(field, normalized);
             if (field.getFieldType() == FieldType.CAPTCHA) {
                 if (normalized == null || normalized.isBlank()) {
-                    continue;
+                    throw new InvalidSubmissionException(
+                            "Captcha invalide pour « " + field.getLabel() + " ».");
                 }
                 if (!recaptchaService.verify(normalized)) {
                     throw new InvalidSubmissionException(
@@ -725,7 +726,7 @@ public class PublicFormService {
     private Form requirePublishedForm(Long formId) {
         Form form = formRepository.findByIdWithFields(formId)
                 .orElseThrow(() -> new FormNotFoundException(formId));
-        if (form.getStatus() != FormStatus.PUBLISHED) {
+        if (form.isBlocked() || form.getStatus() != FormStatus.PUBLISHED) {
             throw new FormNotAvailableException(formId);
         }
         formService.ensurePublishedSnapshot(form);

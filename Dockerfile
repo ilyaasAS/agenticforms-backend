@@ -4,8 +4,9 @@ WORKDIR /app
 COPY pom.xml .
 COPY src ./src
 
-# Exécute les tests unitaires avant le package (ne pas skipTests).
-RUN mvn clean package
+# Tests lancés en CI / en local (mvn test). Skip ici : Testcontainers
+# ne peut pas démarrer Docker pendant le build de l'image.
+RUN mvn clean package -DskipTests
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
