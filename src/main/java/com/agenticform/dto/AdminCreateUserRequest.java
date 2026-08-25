@@ -12,9 +12,9 @@ public record AdminCreateUserRequest(
         String email,
 
         @NotBlank(message = "Password is required")
-        @Size(min = 8, max = 255)
+        @Size(min = 16, max = 255)
         @Pattern(
-                regexp = "^(?=.*[A-Z])(?=.*[\\d\\W_]).{8,255}$",
+                regexp = "^(?=.*[A-Z])(?=.*[\\d\\W_]).{16,255}$",
                 message = "Password must include an uppercase letter and a digit or special character"
         )
         String password,

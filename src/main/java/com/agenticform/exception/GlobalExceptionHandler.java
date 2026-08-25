@@ -295,7 +295,7 @@ public class GlobalExceptionHandler {
     private static String safeValidationMessage(FieldError fieldError) {
         String field = fieldError.getField();
         if ("password".equals(field) || "newPassword".equals(field)) {
-            return "Le mot de passe doit contenir au moins 8 caractères, une majuscule et un chiffre ou caractère spécial.";
+            return "Le mot de passe doit contenir au moins 16 caractères, une majuscule et un chiffre ou caractère spécial.";
         }
         if ("email".equals(field) || "guestEmail".equals(field) || field.endsWith(".guestEmail")) {
             return "Adresse e-mail invalide.";

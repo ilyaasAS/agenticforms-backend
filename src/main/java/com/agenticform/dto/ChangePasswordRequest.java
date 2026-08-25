@@ -13,9 +13,9 @@ public record ChangePasswordRequest(
         String currentPassword,
 
         @NotBlank(message = "Le nouveau mot de passe est obligatoire.")
-        @Size(min = 8, max = 255, message = "Le mot de passe doit contenir entre 8 et 255 caractères.")
+        @Size(min = 16, max = 255, message = "Le mot de passe doit contenir entre 16 et 255 caractères.")
         @Pattern(
-                regexp = "^(?=.*[A-Z])(?=.*[\\d\\W_]).{8,255}$",
+                regexp = "^(?=.*[A-Z])(?=.*[\\d\\W_]).{16,255}$",
                 message = "Le mot de passe doit inclure une majuscule et un chiffre ou caractère spécial."
         )
         String newPassword
