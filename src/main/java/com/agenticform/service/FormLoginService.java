@@ -150,7 +150,9 @@ public class FormLoginService {
 
     /** Config login pour le lien public (snapshot publié si présent). */
     private LoginConfigDto loginConfig(Form form) {
-        return loginConfigFromPagesJson(publishedPagesJson(form));
+        LoginConfigDto published = loginConfigFromPagesJson(publishedPagesJson(form));
+        LoginConfigDto draft = loginConfigFromPagesJson(form.getPagesJson());
+        return loginConfigSupport.resolvePasswordHashForVerification(published, draft);
     }
 
     private String publishedPagesJson(Form form) {

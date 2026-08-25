@@ -12,6 +12,8 @@ public record LocalLoginRequest(
 
         @NotBlank(message = "Password is required")
         @Size(max = 255, message = "Password must be at most 255 characters")
-        String password
+        String password,
+
+        Boolean rememberMe
 ) {
 }

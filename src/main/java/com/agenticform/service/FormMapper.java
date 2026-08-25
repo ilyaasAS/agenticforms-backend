@@ -112,6 +112,11 @@ public class FormMapper {
     }
 
     public PublicFormResponse toPublicResponse(Form form) {
+        return sanitizePublicResponse(toPublishedSnapshotResponse(form));
+    }
+
+    /** Snapshot interne publié : conserve le hash mot de passe (jamais renvoyé tel quel au client). */
+    public PublicFormResponse toPublishedSnapshotResponse(Form form) {
         List<PublicFormFieldResponse> fields = form.getFields() == null
                 ? List.of()
                 : form.getFields().stream()
@@ -120,9 +125,7 @@ public class FormMapper {
                         .map(this::toPublicField)
                         .toList();
         PagesDocumentDto document = parsePagesDocument(form.getPagesJson());
-        List<FormPageDto> pages = document.pages() != null
-                ? loginConfigSupport.sanitizePagesForClient(document.pages())
-                : List.of();
+        List<FormPageDto> pages = document.pages() != null ? document.pages() : List.of();
         return new PublicFormResponse(
                 form.getId(),
                 form.getTitle(),
@@ -135,6 +138,27 @@ public class FormMapper {
                 form.getThemeId() != null && !form.getThemeId().isBlank() ? form.getThemeId() : "dark",
                 document.progressBar(),
                 form.getUpdatedAt());
+    }
+
+    public PublicFormResponse sanitizePublicResponse(PublicFormResponse response) {
+        if (response == null) {
+            return null;
+        }
+        List<FormPageDto> pages = response.pages() != null
+                ? loginConfigSupport.sanitizePagesForClient(response.pages())
+                : List.of();
+        return new PublicFormResponse(
+                response.id(),
+                response.title(),
+                response.description(),
+                response.status(),
+                response.fields(),
+                response.logicRules(),
+                response.calculations(),
+                pages,
+                response.themeId(),
+                response.progressBar(),
+                response.updatedAt());
     }
 
     public PublicFormFieldResponse toPublicField(FormField field) {

@@ -79,7 +79,7 @@ class AuthControllerIntegrationTest {
     void loginLocalSetsCookieAndReturnsUser() throws Exception {
         AuthResponse.UserInfo userInfo = new AuthResponse.UserInfo(
                 10L, "local.user@example.com", "ROLE_USER", "Local User");
-        AuthSessionResult session = new AuthSessionResult("jwt-local-token", new AuthResponse(userInfo));
+        AuthSessionResult session = new AuthSessionResult("jwt-local-token", new AuthResponse(userInfo), 3_600_000L);
         LocalLoginResponse response = new LocalLoginResponse(userInfo);
 
         given(authService.loginLocal(any())).willReturn(session);
@@ -106,7 +106,7 @@ class AuthControllerIntegrationTest {
     void loginOAuth2SetsCookieAndReturnsUser() throws Exception {
         AuthResponse.UserInfo userInfo = new AuthResponse.UserInfo(
                 20L, "oauth.user@example.com", "ROLE_USER", "OAuth User");
-        AuthSessionResult session = new AuthSessionResult("jwt-oauth-token", new AuthResponse(userInfo));
+        AuthSessionResult session = new AuthSessionResult("jwt-oauth-token", new AuthResponse(userInfo), 3_600_000L);
         OAuth2LoginResponse response = new OAuth2LoginResponse(userInfo);
 
         given(authService.loginOAuth2(any())).willReturn(session);

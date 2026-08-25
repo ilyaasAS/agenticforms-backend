@@ -23,6 +23,7 @@ import com.agenticform.dto.FormSubmissionRowResponse;
 import com.agenticform.dto.FormSummaryResponse;
 import com.agenticform.dto.InProgressSessionResponse;
 import com.agenticform.dto.ProgressBarConfigDto;
+import com.agenticform.dto.PublicFormFieldResponse;
 import com.agenticform.dto.PublicFormResponse;
 import com.agenticform.dto.ReorderFormFieldsRequest;
 import com.agenticform.dto.SetFormLoginPasswordRequest;
@@ -240,7 +241,7 @@ public class FormService {
 
         if (request.status() == FormStatus.PUBLISHED) {
             // Publier = figer le brouillon actuel (y compris les champs ci-dessus).
-            applyPublishedSnapshot(form);
+            publishFormSnapshot(form);
         } else {
             if (request.status() != null) {
                 form.setStatus(request.status());
@@ -263,7 +264,7 @@ public class FormService {
     public FormResponse publishForm(Long workspaceId, Long formId, Long userId) {
         requireFormWrite(workspaceId, userId);
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
-        applyPublishedSnapshot(form);
+        publishFormSnapshot(form);
         Form saved = formRepository.save(form);
         return formMapper.toResponse(
                 formRepository.findByIdAndWorkspaceIdWithFields(saved.getId(), workspaceId)
@@ -278,9 +279,31 @@ public class FormService {
         return formMapper.toPublicResponse(form);
     }
 
+    private void publishFormSnapshot(Form form) {
+        pruneStaleFormFields(form);
+        applyPublishedSnapshot(form);
+    }
+
+    /**
+     * Répare les snapshots publiés legacy sans champ « Créneau » sur les pages planification.
+     */
+    @Transactional
+    public void repairPublishedSchedulingSnapshot(Form form) {
+        if (form == null || form.getStatus() != FormStatus.PUBLISHED) {
+            return;
+        }
+        PublicFormResponse previousSnapshot = formMapper.parsePublishedSnapshot(form.getPublishedSnapshotJson());
+        pruneStaleFormFields(form);
+        if (!schedulingSnapshotOutOfDate(previousSnapshot, form)) {
+            return;
+        }
+        applyPublishedSnapshot(form);
+        formRepository.save(form);
+    }
+
     void applyPublishedSnapshot(Form form) {
         Instant now = Instant.now();
-        PublicFormResponse live = formMapper.toPublicResponse(form);
+        PublicFormResponse live = formMapper.toPublishedSnapshotResponse(form);
         PublicFormResponse snapshot = new PublicFormResponse(
                 live.id(),
                 live.title(),
@@ -312,7 +335,7 @@ public class FormService {
         }
         // Backfill legacy : fige l’état actuel sans toucher hasUnpublishedChanges.
         Instant at = form.getUpdatedAt() != null ? form.getUpdatedAt() : Instant.now();
-        PublicFormResponse live = formMapper.toPublicResponse(form);
+        PublicFormResponse live = formMapper.toPublishedSnapshotResponse(form);
         PublicFormResponse snapshot = new PublicFormResponse(
                 live.id(),
                 live.title(),
@@ -341,7 +364,11 @@ public class FormService {
         requireFormWrite(workspaceId, userId);
         Form form = requireFormInWorkspaceWithFields(workspaceId, formId);
         formLoginService.setLoginPassword(form, request.password());
-        markDraftChanged(form);
+        if (form.getStatus() == FormStatus.PUBLISHED) {
+            applyPublishedSnapshot(form);
+        } else {
+            markDraftChanged(form);
+        }
         Form saved = formRepository.save(form);
         return formMapper.toResponse(
                 formRepository.findByIdAndWorkspaceIdWithFields(saved.getId(), workspaceId)
@@ -817,6 +844,51 @@ public class FormService {
         }
         String settings = field.getSettingsJson();
         return settings != null && settings.contains("\"schedulingSlot\":true");
+    }
+
+    private boolean schedulingSnapshotOutOfDate(PublicFormResponse previousSnapshot, Form form) {
+        PublicFormResponse draftSnapshot = formMapper.toPublishedSnapshotResponse(form);
+        if (draftSnapshot.pages() == null) {
+            return false;
+        }
+        for (FormPageDto page : draftSnapshot.pages()) {
+            if (page == null || !"scheduling".equalsIgnoreCase(page.type())) {
+                continue;
+            }
+            List<Long> draftFieldIds = page.fieldIds() == null ? List.of() : page.fieldIds();
+            List<Long> publishedFieldIds = publishedFieldIdsForPage(previousSnapshot, page.id());
+            if (!draftFieldIds.equals(publishedFieldIds)) {
+                return true;
+            }
+        }
+        long draftSlotCount = countPublicSchedulingSlotFields(draftSnapshot.fields());
+        long publishedSlotCount = previousSnapshot == null || previousSnapshot.fields() == null
+                ? 0
+                : countPublicSchedulingSlotFields(previousSnapshot.fields());
+        return draftSlotCount > publishedSlotCount;
+    }
+
+    private List<Long> publishedFieldIdsForPage(PublicFormResponse snapshot, String pageId) {
+        if (snapshot == null || snapshot.pages() == null || pageId == null) {
+            return List.of();
+        }
+        for (FormPageDto page : snapshot.pages()) {
+            if (page != null && pageId.equals(page.id())) {
+                return page.fieldIds() == null ? List.of() : page.fieldIds();
+            }
+        }
+        return List.of();
+    }
+
+    private long countPublicSchedulingSlotFields(List<PublicFormFieldResponse> fields) {
+        if (fields == null) {
+            return 0;
+        }
+        return fields.stream().filter(this::isPublicSchedulingSlotField).count();
+    }
+
+    private boolean isPublicSchedulingSlotField(PublicFormFieldResponse field) {
+        return field != null && "scheduling_page".equalsIgnoreCase(field.uiComponent());
     }
 
     private void removeFieldFromPages(Form form, Long fieldId) {

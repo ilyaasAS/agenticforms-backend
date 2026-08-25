@@ -3,6 +3,7 @@ package com.agenticform.service;
 import java.util.Comparator;
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -63,6 +64,7 @@ public class AuthService {
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final EmailVerificationTokenRepository emailVerificationTokenRepository;
     private final AdminBootstrapService adminBootstrapService;
+    private final long rememberMeExpirationMs;
 
     public AuthService(
             UserRepository userRepository,
@@ -78,7 +80,8 @@ public class AuthService {
             IntegrationConnectionRepository integrationConnectionRepository,
             PasswordResetTokenRepository passwordResetTokenRepository,
             EmailVerificationTokenRepository emailVerificationTokenRepository,
-            AdminBootstrapService adminBootstrapService) {
+            AdminBootstrapService adminBootstrapService,
+            @Value("${jwt.remember-me-expiration-ms:604800000}") long rememberMeExpirationMs) {
         this.userRepository = userRepository;
         this.oauthAccountRepository = oauthAccountRepository;
         this.passwordEncoder = passwordEncoder;
@@ -93,6 +96,7 @@ public class AuthService {
         this.passwordResetTokenRepository = passwordResetTokenRepository;
         this.emailVerificationTokenRepository = emailVerificationTokenRepository;
         this.adminBootstrapService = adminBootstrapService;
+        this.rememberMeExpirationMs = Math.max(rememberMeExpirationMs, 60_000L);
     }
 
     /**
@@ -169,12 +173,14 @@ public class AuthService {
             throw new BadCredentialsException("Invalid credentials");
         }
 
-        String token = jwtTokenProvider.generateToken(user);
-        return toAuthSession(token, user);
+        boolean rememberMe = Boolean.TRUE.equals(request.rememberMe());
+        long ttlMs = rememberMe ? rememberMeExpirationMs : jwtTokenProvider.getExpirationMs();
+        String token = jwtTokenProvider.generateToken(user, ttlMs);
+        return toAuthSession(token, user, ttlMs);
     }
 
     public AuthSessionResult loginLocal(LocalLoginRequest request) {
-        return login(new LoginRequest(request.email(), request.password()));
+        return login(new LoginRequest(request.email(), request.password(), request.rememberMe()));
     }
 
     @Transactional(readOnly = true)
@@ -198,7 +204,7 @@ public class AuthService {
             throw new InvalidOAuthCodeException();
         }
 
-        return toAuthSession(jwt, user);
+        return toAuthSession(jwt, user, jwtTokenProvider.getExpirationMs());
     }
 
     public AuthSessionResult loginOAuth2(OAuth2LoginRequest request) {
@@ -287,7 +293,7 @@ public class AuthService {
         User saved = userRepository.save(user);
 
         String token = jwtTokenProvider.generateToken(saved);
-        return toAuthSession(token, saved);
+        return toAuthSession(token, saved, jwtTokenProvider.getExpirationMs());
     }
 
     /**
@@ -351,7 +357,7 @@ public class AuthService {
                 providers);
     }
 
-    private AuthSessionResult toAuthSession(String accessToken, User user) {
+    private AuthSessionResult toAuthSession(String accessToken, User user, long expiresInMs) {
         return new AuthSessionResult(
                 accessToken,
                 new AuthResponse(
@@ -359,7 +365,8 @@ public class AuthService {
                                 user.getId(),
                                 user.getEmail(),
                                 user.getRole().name(),
-                                user.getFullName())));
+                                user.getFullName())),
+                expiresInMs);
     }
 
     public LocalLoginResponse toLocalLoginResponse(AuthSessionResult session) {

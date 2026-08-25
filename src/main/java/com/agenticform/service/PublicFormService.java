@@ -237,10 +237,11 @@ public class PublicFormService {
     public PublicFormResponse getPublishedForm(Long formId) {
         Form form = requirePublishedForm(formId);
         formService.ensurePublishedSnapshot(form);
+        formService.repairPublishedSchedulingSnapshot(form);
         formRepository.incrementViewCount(formId);
         PublicFormResponse snapshot = formMapper.parsePublishedSnapshot(form.getPublishedSnapshotJson());
         if (snapshot != null) {
-            return snapshot;
+            return formMapper.sanitizePublicResponse(snapshot);
         }
         // Repli legacy (ne devrait plus arriver après ensurePublishedSnapshot)
         return formMapper.toPublicResponse(form);

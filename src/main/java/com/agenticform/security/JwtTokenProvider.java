@@ -71,11 +71,16 @@ public class JwtTokenProvider {
     }
 
     public String generateToken(User user) {
+        return generateToken(user, expirationMs);
+    }
+
+    public String generateToken(User user, long ttlMs) {
         if (user == null || user.getId() == null) {
             throw new IllegalArgumentException("User id required for JWT subject");
         }
+        long effectiveTtl = Math.max(ttlMs, 60_000L);
         Date now = new Date();
-        Date expiry = new Date(now.getTime() + expirationMs);
+        Date expiry = new Date(now.getTime() + effectiveTtl);
 
         return Jwts.builder()
                 .subject(String.valueOf(user.getId()))

@@ -33,6 +33,20 @@ public class LoginConfigSupport {
         return config.methods().stream().anyMatch(method -> "google".equalsIgnoreCase(method));
     }
 
+    /** Reprend le hash du brouillon si absent du snapshot publié (legacy). */
+    public LoginConfigDto resolvePasswordHashForVerification(LoginConfigDto published, LoginConfigDto draft) {
+        if (published == null) {
+            return draft;
+        }
+        if (isPasswordConfigured(published)) {
+            return published;
+        }
+        if (draft != null && isPasswordConfigured(draft)) {
+            return copyLoginConfig(published, draft.passwordHash());
+        }
+        return published;
+    }
+
     public LoginConfigDto sanitizeForClient(LoginConfigDto config) {
         if (config == null) {
             return null;

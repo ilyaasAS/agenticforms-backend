@@ -87,7 +87,8 @@ public class AuthController {
             HttpServletRequest httpRequest,
             HttpServletResponse httpResponse) {
         AuthSessionResult session = authService.login(request);
-        authCookieService.setAccessToken(httpRequest, httpResponse, session.accessToken());
+        authCookieService.setAccessToken(
+                httpRequest, httpResponse, session.accessToken(), session.expiresInMs());
         return ResponseEntity.ok(session.response());
     }
 
@@ -97,7 +98,8 @@ public class AuthController {
             HttpServletRequest httpRequest,
             HttpServletResponse httpResponse) {
         AuthSessionResult session = authService.loginLocal(request);
-        authCookieService.setAccessToken(httpRequest, httpResponse, session.accessToken());
+        authCookieService.setAccessToken(
+                httpRequest, httpResponse, session.accessToken(), session.expiresInMs());
         return ResponseEntity.ok(authService.toLocalLoginResponse(session));
     }
 
@@ -107,7 +109,8 @@ public class AuthController {
             HttpServletRequest httpRequest,
             HttpServletResponse httpResponse) {
         AuthSessionResult session = authService.exchangeOAuthCode(request.code());
-        authCookieService.setAccessToken(httpRequest, httpResponse, session.accessToken());
+        authCookieService.setAccessToken(
+                httpRequest, httpResponse, session.accessToken(), session.expiresInMs());
         return ResponseEntity.ok(session.response());
     }
 
@@ -117,7 +120,8 @@ public class AuthController {
             HttpServletRequest httpRequest,
             HttpServletResponse httpResponse) {
         AuthSessionResult session = authService.loginOAuth2(request);
-        authCookieService.setAccessToken(httpRequest, httpResponse, session.accessToken());
+        authCookieService.setAccessToken(
+                httpRequest, httpResponse, session.accessToken(), session.expiresInMs());
         return ResponseEntity.ok(authService.toOAuth2LoginResponse(session));
     }
 
@@ -184,7 +188,8 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
         AuthSessionResult session = authService.changePassword(principal, request);
-        authCookieService.setAccessToken(httpRequest, httpResponse, session.accessToken());
+        authCookieService.setAccessToken(
+                httpRequest, httpResponse, session.accessToken(), session.expiresInMs());
         return ResponseEntity.ok(new MessageResponse("Mot de passe mis à jour."));
     }
 
