@@ -67,7 +67,7 @@ class AuthControllerIntegrationTest {
                         .content("""
                                 {
                                   "email": "new.user@example.com",
-                                  "password": "StrongP@ss1",
+                                  "password": "StrongP@ssword16!",
                                   "fullName": "New User"
                                 }
                                 """))
@@ -90,7 +90,7 @@ class AuthControllerIntegrationTest {
                         .content("""
                                 {
                                   "email": "local.user@example.com",
-                                  "password": "StrongP@ss1"
+                                  "password": "StrongP@ssword16!"
                                 }
                                 """))
                 .andExpect(status().isOk())
@@ -99,7 +99,7 @@ class AuthControllerIntegrationTest {
                 .andExpect(jsonPath("$.user.role").value("ROLE_USER"))
                 .andExpect(jsonPath("$.user.fullName").value("Local User"));
 
-        verify(authCookieService).setAccessToken(any(), any(), eq("jwt-local-token"));
+        verify(authCookieService).setAccessToken(any(), any(), eq("jwt-local-token"), eq(3_600_000L));
     }
 
     @Test
@@ -125,7 +125,7 @@ class AuthControllerIntegrationTest {
                 .andExpect(jsonPath("$.user.role").value("ROLE_USER"))
                 .andExpect(jsonPath("$.user.fullName").value("OAuth User"));
 
-        verify(authCookieService).setAccessToken(any(), any(), eq("jwt-oauth-token"));
+        verify(authCookieService).setAccessToken(any(), any(), eq("jwt-oauth-token"), eq(3_600_000L));
     }
 
     @Test

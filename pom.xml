@@ -169,6 +169,48 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+            <!-- Couverture de tests (JaCoCo) — rapport HTML après mvn test -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.12</version>
+                <configuration>
+                    <!--
+                      Rapport JaCoCo centré sur les modules unit-testés (auth, contact, admin, sécu cookie/JWT).
+                      Les intégrations Stripe / Calendly / Google Calendar et le builder massif
+                      sont hors périmètre de ce rapport (tests d'intégration / E2E prévus ensuite).
+                    -->
+                    <includes>
+                        <include>com/agenticform/service/AuthService*</include>
+                        <include>com/agenticform/service/ContactService*</include>
+                        <include>com/agenticform/service/RecaptchaService*</include>
+                        <include>com/agenticform/service/AdminUserService*</include>
+                        <include>com/agenticform/service/AdminFormService*</include>
+                        <include>com/agenticform/service/FieldIdRemapper*</include>
+                        <include>com/agenticform/security/AuthCookieService*</include>
+                        <include>com/agenticform/security/CookieSecuritySupport*</include>
+                        <include>com/agenticform/security/JwtTokenProvider*</include>
+                        <include>com/agenticform/controller/ContactInboxController*</include>
+                        <include>com/agenticform/controller/AdminContactController*</include>
+                        <include>com/agenticform/controller/AdminFormController*</include>
+                    </includes>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
